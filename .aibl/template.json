@@ -1,7 +1,7 @@
 {
   "schema_version": "aibl.workbench-template/v1",
-  "repository": "aibuild-lab/agent-workbench",
-  "version": "0.0.10",
+  "repository": "aibuild-lab/my-workbench-template",
+  "version": "0.0.12",
   "source_repository": "aibuild-lab/agent-native-workforce-internal",
   "state": "preparation_candidate"
 }
