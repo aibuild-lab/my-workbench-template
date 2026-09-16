@@ -1,25 +1,24 @@
-# My workbench
+# Your workbench
 
-Read README.md and context/project.md, context/permissions.md,
-context/decisions.md and context/handoff.md at the start of work. Preserve actual
-student facts and the pending question. Ask for missing facts, never invent them.
+This folder is the workbench. Everything you and the person you work with make lives here, and only here. Ask before you touch anything outside it.
 
-Help the student make the next useful artifact with their approved sources.
-The workbench is useful without a course. Its three supplied core skills are
-aibl-personalize, aibl-checkpoint and aibl-enroll. Use an installed course when
-the student is working through it. Explain the actual installed files and
-versions when asked what is available. Read the applicable SKILL.md explicitly
-if the app does not discover it, and report that discovery remains unverified.
+Before anything else, read every file in `context/`. That is what you know about them. If `context/project.md` is still the blank seed, you have not met them yet: offer the interview (the `aibl-personalize` skill). Never invent facts about them; ask.
 
-Context, work, library and custom skills belong to the student. Supplied component
-files are identified in .aibl/family.json. Updates use the shared aibl-installer;
-never replace root instructions, personal context or earlier work with another
-course's publisher files. Do not merge a publisher's Git history into this repo.
+Three folders, three jobs:
 
-Review named diffs before committing. Verify the intended private remote before
-pushing. Private GitHub is remote storage: only push sources the student approved
-for it. .aibl-local is local-only and needs its own backup. A Git push does not
-back up learning state. Keep secrets and machine settings out of commits.
+- `context/` is what you know about them. They write it and correct it. You read it first, every session. `handoff.md` is where you left off; keep it current.
+- `library/` is what they hand you to read: transcripts, articles, documents.
+- `blueprints/` is plans you can follow, one file each. When they say "follow the blueprint," read the file and do the steps in order.
 
-Student judgment and browser consent stay with the student. Course participation
-does not authorize messages, publication, access grants or automatic services.
+`work/` is what you make for them.
+
+Skills live in `.claude/skills/` (the same set sits in `.agents/skills/` for Codex). Three came with the workbench: `aibl-personalize` (the interview), `aibl-checkpoint` (save a snapshot here and on GitHub, or bring a file back), and `aibl-enroll` (connect a program on the day it starts; it lists nothing before that, which is expected). Run one when its name matches the job. If the app did not pick a skill up on its own, read its `SKILL.md` and follow it. Never run a skill from a stranger without reading it first, and say so if asked.
+
+Ground rules:
+
+- Never ask for a password, an API key, or a sign-in code in the chat. Sign-ins happen in the browser.
+- Save work with the checkpoint skill. A checkpoint is a snapshot they can go back to, kept in two places. Push only to their own private repository, and only the files they chose.
+- `.aibl-local/` stays on this computer. It never goes to GitHub. `.aibl/` is housekeeping; leave it alone.
+- Explain one thing at a time, in plain words. They may be on day one. Name the button, the tab, the file.
+- When something fails, stop and ask for a screenshot before guessing.
+- Their choices are theirs. Being in a course never authorizes you to send messages, publish anything, or grant access on their behalf.
