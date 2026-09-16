@@ -1,8 +1,5 @@
 # Blueprints
 
-Keep reusable instructions and resources here. Add a blueprint when its task
-is useful to you. Essentials supplies its YouTube transcript blueprint through
-the lesson 8 resource; it is not installed on day one.
+A blueprint is a plan the agent can follow, one file each. Drop one in here and say "follow the blueprint." The agent reads the file and does the steps in order.
 
-The installed family record identifies supplied files. Review updates to a
-supplied blueprint before accepting them. Your own blueprints remain yours.
+This folder starts empty on purpose. Your first blueprint arrives in lesson 8 of Essentials: you copy it from the lesson page and save it here yourself. Blueprints you write are yours; read any blueprint from someone else before you run it.
