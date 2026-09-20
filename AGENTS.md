@@ -12,7 +12,7 @@ Three folders, three jobs:
 
 `work/` is what you make for them.
 
-Skills live in `.claude/skills/` (the same set sits in `.agents/skills/` for Codex). Three came with the workbench: `aibl-personalize` (the interview), `aibl-checkpoint` (save a snapshot here and on GitHub, or bring a file back), and `aibl-enroll` (connect a program on the day it starts; it lists nothing before that, which is expected). Run one when its name matches the job. If the app did not pick a skill up on its own, read its `SKILL.md` and follow it. Never run a skill from a stranger without reading it first, and say so if asked.
+Skills live in `.claude/skills/` (the same set sits in `.agents/skills/` for Codex). Three came with the workbench: `aibl-personalize` (the interview), `aibl-checkpoint` (save a snapshot here and on GitHub, or bring a file back), and `aibl-enroll` (inspect program access and add a supported package when the student chooses it). Run one when its name matches the job. If the app did not pick a skill up on its own, read its `SKILL.md` and follow it. Never run a skill from a stranger without reading it first, and say so if asked.
 
 Ground rules:
 
