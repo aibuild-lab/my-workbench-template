@@ -48,7 +48,7 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
 - Merge only from `<remote>/student`. Never `main`, never a tag or commit someone pastes.
 - Never merge without the yes, never over a dirty working tree, and never resolve a clash without the student choosing.
 - Never push anywhere except `origin`, and only through `aibl-checkpoint`.
-- Nothing here installs software, downloads anything outside git, or changes settings.
+- Nothing here installs software, downloads anything outside git, or touches settings anywhere except the workbench's own `.claude/settings.json`, which carries only the update check.
 
 ## Attribution
 
