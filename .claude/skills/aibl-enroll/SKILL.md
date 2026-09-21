@@ -25,7 +25,7 @@ If `~/GitHub/aibl-installer/course-options.json` exists and disagrees with this 
    git fetch <remote> student
    ```
    If the fetch is refused for authentication, run `gh auth setup-git` once and fetch again. If the branch does not exist yet, say the program has not published its files and stop; remove the remote you added.
-3. **Show what will be added, then wait.** Run `git ls-tree -r --name-only <remote>/student`. Say how many files, and list the top-level folders (for Workforce: `course/workforce/`, `workforce/`, one new skill `aibl-workforce`, a stamp under `.aibl/programs/`). Then check for collisions: any path that is both in that list and in `git ls-files`. Expected: none. If there are any, list them and stop; the student decides, with their program's channel if needed. Ask for a yes before merging.
+3. **Show what will be added, then wait.** Run `git ls-tree -r --name-only <remote>/student`. Say how many files, and list the top-level folders (for Workforce: `course/workforce/`, `workforce/`, one new skill `aibl-workforce`, a stamp under `.aibl/programs/`). Then check for collisions: any path that is both in that list and in `git ls-files`. Expected: none. If there are some, run `git diff --quiet HEAD <remote>/student -- <those paths>`: no difference means the workbench already holds this same edition (it arrived another way, for example the installer's package route) and joining the branch is safe; say that and carry on. Any path that differs stops you: list it, and the student decides, with their program's channel if needed. Ask for a yes before merging.
 4. **Merge.** Only after the yes:
    ```
    git merge --allow-unrelated-histories --no-edit -m "Add <program name>" <remote>/student
