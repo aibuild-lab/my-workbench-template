@@ -9,7 +9,14 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
 
 ## What to do
 
-1. **Find the programs.** `git remote` lists them; anything other than `origin` is a program (`agent-workforce`, `the-lab`). None means "no program is connected yet; `aibl-enroll` connects one." Stop there.
+0. **Refresh the workbench's own skills first.** The four `aibl-` skills come from the public template, and the template is not a program: it is never merged, only its skill folders are copied. From the workbench folder:
+   ```
+   git remote add template https://github.com/aibuild-lab/my-workbench-template.git   # once; skip if it exists
+   git fetch template main
+   git checkout template/main -- .claude/skills/aibl-personalize .claude/skills/aibl-checkpoint .claude/skills/aibl-enroll .claude/skills/aibl-update .agents/skills/aibl-personalize .agents/skills/aibl-checkpoint .agents/skills/aibl-enroll .agents/skills/aibl-update
+   ```
+   If `git status --short` shows changes, say which skills were updated and commit them: `git commit -m "Update workbench skills from the template"`. If the student had edited one of those four skills, say so before the checkout and let them choose to keep theirs (skip that folder). Nothing else in the template is ever copied: not `README.md`, not `context/`, not the instruction files.
+1. **Find the programs.** `git remote` lists them; anything other than `origin` and `template` is a program (`agent-workforce`, `the-lab`). None means "no program is connected yet; `aibl-enroll` connects one." Stop there.
 2. **Check, change nothing.** For each program remote:
    ```
    git fetch <remote> student
