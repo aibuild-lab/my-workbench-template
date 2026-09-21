@@ -1,29 +1,40 @@
 ---
 name: aibl-enroll
-description: Connect a program you have joined (Agent Workforce, The Lab) to this workbench. Lists nothing until your program's first live session, and that is expected.
+description: Connect an accessible program to this workbench through a verified, student-confirmed enrollment preview.
 ---
 
-# Enroll
+# Connect Workforce
 
-This skill is for the day a program starts. Before that day it lists nothing, because a program's repository is unlocked at its first live session. If they run it early, say exactly that and stop. Nothing is wrong.
+Use this skill only when the student chooses to connect a program. Keep their
+existing workbench, context, work and selected client (Claude or Codex).
 
-## What it does
+1. Read the official [Workforce handoff](https://github.com/aibuild-lab/aibl-installer/blob/main/WORKFORCE-HANDOFF.md).
+   Reading that page does not authorize executing code from a moving branch.
+   The course team must supply an independently admitted distribution file,
+   its independent SHA-256, and the matching clean retained installer revision.
+   If these are unavailable, say that verified delivery is not available yet.
+   Never infer an invitation or access date, pull a newer installer, or copy
+   replacement skills by hand.
+2. From that exact installer, use its `scripts/enroll.py --workbench ABSOLUTE_PATH
+   --check --json` to inspect access without changing the workbench. Report the
+   actual result. Missing access needs the signed-in account and course-team
+   check, not a guess about when the course starts.
+3. For an Essentials workbench without a family record, use the verified
+   installer to preview `--program agent-workforce --preview --harness claude`
+   (or `codex`) with `--distribution FILE --distribution-sha256 SHA256`, the
+   actual `--workbench`, and `--json`. For an already connected family workbench,
+   use its installed adjacent enrollment helper and retained association instead.
+4. Explain the exact preview, including any replacement of all three supplied
+   core skills. Preserve edited skills and conflicts for review. Ask the student
+   to confirm these changes. Selection or `--yes` is never installation approval.
+5. Apply only the returned plan ID using the same exact installer and workbench:
+   `scripts/enroll.py --workbench ABSOLUTE_PATH --apply-plan PLAN_ID --json`.
+   Changed inputs require a new preview and confirmation. Follow the returned
+   recovery instructions after interruption; do not delete records or start over.
+6. After verified installation, refresh the selected app and use the supplied
+   `aibl-workforce` skill and returned first action. File installation is not proof
+   that a worker ran or that the student completed any course activity.
 
-1. Find the installer on this computer: `~/GitHub/aibl-installer` (Windows: `$HOME\GitHub\aibl-installer`). If it is missing, say: "The installer that built this workbench is not on this computer. Paste the setup prompt from your program page again; it puts the installer back without touching your workbench."
-2. From the workbench folder, run:
-   - Mac: `python3 ~/GitHub/aibl-installer/scripts/enroll.py --workbench "$PWD" --check --json`
-   - Windows: `py -3 $HOME\GitHub\aibl-installer\scripts\enroll.py --workbench "$PWD" --check --json` (or `python` if `py` is absent)
-
-   `--check` reads only. It asks GitHub which program repositories this account can read and changes nothing.
-3. Read the JSON. Show one line per program: which ones this account can read, and which are already connected. If none are readable, say: "Nothing to add yet. Your program's repository unlocks at your first live session. Run me again that day." Do not guess why a program is missing.
-4. If a program is readable and they want it: run the same command without `--check`, with `--program <id>`. It records the choice and names the next step for that program. It does not install files by itself; the program's own step does that, and it will say so.
-
-## Missing a program they paid for?
-
-Give them what to send to their program's channel: the program name and their GitHub username (`gh api user --jq .login`). Do not troubleshoot invitations from here.
-
-Never pull a newer installer. Never delete or replace anything in the workbench.
-
-## Attribution
-
-Original AIBL method. MIT, like the rest of this template.
+Never create another workbench, switch clients, grant access, send work, commit,
+or push as part of enrollment. Browser sign-in and student decisions stay with
+the student.
