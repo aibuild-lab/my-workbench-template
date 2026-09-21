@@ -17,7 +17,11 @@ git -C "$workbench" init -q -b main
 git -C "$workbench" add . && git -C "$workbench" -c user.name=test -c user.email=test@example.invalid commit -qm workbench
 git -C "$workbench" remote add template "$template"
 git -C "$workbench" fetch -q template main
-git -C "$workbench" diff --quiet HEAD template/main -- .claude/skills/aibl-enroll || :
+set +e
+git -C "$workbench" diff --quiet HEAD template/main -- .claude/skills/aibl-enroll
+status=$?
+set -e
+test "$status" -eq 1
 git -C "$workbench" checkout -q template/main -- .claude/skills/aibl-update
 test "$(cat "$workbench/.claude/skills/aibl-enroll/SKILL.md")" = 'my enrollment choice'
 test "$(cat "$workbench/.claude/skills/aibl-update/SKILL.md")" = 'template update'

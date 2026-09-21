@@ -15,7 +15,11 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
    git remote get-url template >/dev/null 2>&1 || git remote add template https://github.com/aibuild-lab/my-workbench-template.git
    git fetch template main
    ```
-   For each skill folder, first run `git diff --quiet HEAD template/main -- <folder>`. If it differs, show `git diff HEAD template/main -- <folder>` and ask whether to keep the workbench version or take the template version. It may be an older template skill or a committed student edit, so never guess. Skip folders the student keeps; run the checkout only for folders they approve. The hook is the workbench's read-only update check. If `.claude/settings.json` is absent, copy the template's file too. If it already exists, leave it unchanged so its hooks and preferences are preserved; the student can still run this skill directly. If `git status --short` shows changes, say which approved skills were updated and commit them: `git commit -m "Update workbench skills from the template"`. Nothing else in the template is ever copied: not `README.md`, not `context/`, not the instruction files.
+   For each skill folder and `.claude/hooks/update-check.mjs`, first run `git diff --quiet HEAD template/main -- <path>`. If it differs, show `git diff HEAD template/main -- <path>` and ask whether to keep the workbench version or take the template version. It may be an older template path or a committed student edit, so never guess. Skip paths the student keeps; after they approve the template version, run:
+   ```
+   git checkout template/main -- <path>
+   ```
+   The hook is the workbench's read-only update check. If `.claude/settings.json` is absent, copy the template's file too. If it already exists, leave it unchanged so its hooks and preferences are preserved; the student can still run this skill directly. If `git status --short` shows changes, say which approved skills were updated and commit them: `git commit -m "Update workbench skills from the template"`. Nothing else in the template is ever copied: not `README.md`, not `context/`, not the instruction files.
 2. **Check, change nothing.** Run the workbench's own check, the same one that runs at the start of every new conversation:
    ```
    node .claude/hooks/update-check.mjs --json
