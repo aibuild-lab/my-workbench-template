@@ -32,3 +32,28 @@ Open any of them and read it. A skill is a folder with one file in it, `SKILL.md
 ## When a program starts, and when it changes
 
 Every AI Build Lab program you join lands inside this same folder. You never set up a second one. On the day your access opens, run `aibl-enroll`: it shows you what the program adds, you say yes, and it merges the program's files in next to yours. When the course team publishes a change, `aibl-update` shows you what changed and merges it in the same way. Your `context`, `library` and `work` folders are yours; a program never contains them.
+
+## Updates
+
+On every new conversation the workbench checks each connected program's `student` branch (fetch only, never a pull) and says when an update is waiting, the way Camp's update check does; `.claude/hooks/session-update-check.mjs`, wired in `.claude/settings.json`.
+
+Each program you connect is a remote of this folder, and the course team moves its `student` branch forward when they publish; `aibl-update` fetches that branch, shows you what changed component by component, and merges it in after your yes. The program's files live in this project folder, while `~/.claude/agents/` holds only links back to them, so the desktop app's `@` dropdown finds your agents from any thread. After every enroll or update the skill rebuilds the registry, refreshes those links, and asks your Chief of Staff "Who are you?" so you know the update is live and not just on disk.
+
+```mermaid
+flowchart TD
+    A[Install the workbench] --> B[aibl-enroll: connect a program]
+    B --> C[The program's student branch merges in, once]
+    C --> D[aibl-update, over time: each new edition merges in after your yes]
+    D --> D
+    subgraph P[Project folder: this workbench]
+        C
+        D
+        E[.claude/agents/aibl-*.md: the agent files]
+    end
+    subgraph G[Global links: ~/.claude/agents/]
+        F[aibl-*.md: links back to the project folder]
+    end
+    D --> E
+    E -->|ln -sf| F
+    F --> H[The @ dropdown in the desktop app]
+```

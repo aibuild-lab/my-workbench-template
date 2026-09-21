@@ -32,7 +32,7 @@ If `~/GitHub/aibl-installer/course-options.json` exists and disagrees with this 
    ```
    It brings the program's files in as one merge commit on top of the student's own history. If `git status` was not clean before, ask them to save or set aside their unfinished work first (offer `aibl-checkpoint`); never stash or discard for them.
 5. **Show what landed.** `git show --stat HEAD` summarised in plain words: the new folders, the new skill, and that `context/`, `work/` and `library/` did not change. Offer `aibl-checkpoint` so their private copy on GitHub has the program too.
-6. **Point at the program's own start.** Say: start a new session in this folder (skills load when a session starts), then run the program's entry skill. For Workforce that is `aibl-workforce`.
+6. **Point at the program's own start.** Say: start a new session in this folder (skills load when a session starts), then run the program's entry skill. For Workforce that is `aibl-workforce`. Then the same step 6.5 of `aibl-update` applies here too: rebuild the registry, refresh the global agent links, and prove one agent answers, before the entry skill.
 
 ## Rules
 
