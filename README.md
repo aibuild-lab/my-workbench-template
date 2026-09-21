@@ -19,6 +19,7 @@ Type a forward slash in the Claude app, or a dollar sign in the Codex app, and y
 - **aibl-personalize**: the interview. Three or four questions, then it writes `context/project.md` and shows you before it saves.
 - **aibl-checkpoint**: save a snapshot of your work and send it to your private copy on GitHub, in one move. Also brings a file back.
 - **aibl-enroll**: check access and review a verified plan to connect Workforce when you choose. Delivery must be available before installation; access is not tied to an assumed session date.
+- **aibl-update**: update your programs. It refreshes this workbench's own skills from the template, then checks each connected program for a newer edition, shows what would change, and merges it in after your yes. Your own files are never overwritten.
 
 Open any of them and read it. A skill is a folder with one file in it, `SKILL.md`. Read one before you run it, especially one you did not write.
 
