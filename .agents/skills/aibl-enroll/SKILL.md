@@ -1,45 +1,32 @@
 ---
 name: aibl-enroll
-description: Connect a program you have joined (Agent Workforce, The Lab) to this workbench. Shows what will be added, waits for a yes, then merges the program's files in. Lists nothing until your program has opened your access, and that is expected.
+description: Add an accessible program to your existing workbench after showing the exact changes and receiving your approval.
 ---
 
-# Enroll
+# Connect your program
 
-A program is a folder of files kept on a GitHub branch only its students can read. Enrolling means adding that branch as a remote of this workbench and merging it in, once. Updates later are `aibl-update`. Nothing here creates a second workbench, and nothing here touches `context/`, `library/`, `work/`, `CLAUDE.md` or `AGENTS.md`.
+Workforce joins the Essentials `my-workbench` you already own. No second workbench. Updates later use `aibl-update`. Keep Camp and Agent Native OS projects separate.
 
-## The programs
+## Current destinations
 
-| Program | Remote name | Repository | Branch |
+| Program | Remote | Repository | Branch |
 |---|---|---|---|
-| Agent Workforce | `agent-workforce` | `https://github.com/aibuild-lab/agent-workforce.git` | `student` |
-| The Lab | `the-lab` | `https://github.com/aibuild-lab/the-lab.git` | `student` |
+| Agent Workforce | agent-workforce | https://github.com/aibuild-lab/agent-workforce.git | student |
+| The Lab | the-lab | https://github.com/aibuild-lab/the-lab.git | student |
 
-If `~/GitHub/aibl-installer/course-options.json` exists and disagrees with this table, the installer's file wins; say so.
+If the retained installer's `course-options.json` has an `enrollment` object for the selected program, check its `repository` and `branch` against this table. A disagreement stops for course-team review. If that object is absent, use this table. The old `publisher`, `release_product`, and `adopt_skill` fields describe historical package delivery, not this Git route. Never rewrite a retained installer or package receipt.
 
-## What to do
+## Steps
 
-1. **Check access, change nothing.** For each program not yet connected (`git remote` does not list its remote name), run `gh api repos/<owner/repo> --jq .full_name`. Readable means the student can enroll. A 404 means their access has not opened yet: say "Nothing to add yet. Your program's access opens on its schedule; check your cohort on the Learn dashboard at https://learn.aibuildlab.com/ and run me again then." Do not guess why. If they are missing a program they paid for, give them what to send to their program's channel: the program name and `gh api user --jq .login`.
-2. **Ask which readable program to connect**, if more than one. Then, from the workbench folder:
-   ```
-   git remote add <remote> <repository>
-   git fetch <remote> student
-   ```
-   If the fetch is refused for authentication, run `gh auth setup-git` once and fetch again. If the branch does not exist yet, say the program has not published its files and stop; remove the remote you added.
-3. **Show what will be added, then wait.** Run `git ls-tree -r --name-only <remote>/student`. Say how many files, and list the top-level folders (for Workforce: `course/workforce/`, `workforce/`, one new skill `aibl-workforce`, a stamp under `.aibl/programs/`). Then check for collisions: any path that is both in that list and in `git ls-files`. Expected: none. If there are some, run `git diff --quiet HEAD <remote>/student -- <those paths>`: no difference means the workbench already holds this same edition (it arrived another way, for example the installer's package route) and joining the branch is safe; say that and carry on. Any path that differs stops you: list it, and the student decides, with their program's channel if needed. Ask for a yes before merging.
-4. **Merge.** Only after the yes:
-   ```
-   git merge --allow-unrelated-histories --no-edit -m "Add <program name>" <remote>/student
-   ```
-   It brings the program's files in as one merge commit on top of the student's own history. If `git status` was not clean before, ask them to save or set aside their unfinished work first (offer `aibl-checkpoint`); never stash or discard for them.
-5. **Show what landed.** `git show --stat HEAD` summarised in plain words: the new folders, the new skill, and that `context/`, `work/` and `library/` did not change. Offer `aibl-checkpoint` so their private copy on GitHub has the program too.
-6. **Point at the program's own start.** Say: start a new session in this folder (skills load when a session starts), then run the program's entry skill. For Workforce that is `aibl-workforce`.
+1. **Check the folder and unfinished work before changing anything.** Run `git rev-parse --show-toplevel`, `git remote get-url origin`, and `gh api user --jq .login`. Confirm this is the student's workbench, with a private GitHub origin owned by that account (`gh repo view <owner/repo> --json nameWithOwner,isPrivate`). Accept the normal HTTPS or SSH spelling of that exact repository. A wrong folder, unknown ownership, public origin, symlinked workbench, or missing setup stops here. Run `git status --porcelain --untracked-files=all`; any output stops for the student to checkpoint. Never stash, discard, or rerun setup. Missing skills on an older workbench use the official installer `UPDATE-PROMPT.md`, not a new installation.
+2. **Check access.** Run `gh api repos/<owner/repo> --jq .full_name` for the selected program. A 404 establishes unavailable repository access, not why or when it opens. Authentication and network errors remain separate failures. Give the student their signed-in GitHub username and the program name to use when asking the team; check Learn separately. Never grant access or send a message for them.
+3. **Connect or reuse the exact remote.** Inspect an existing remote's URL; accept only the HTTPS or SSH URL of the listed repository. Stop on mismatch, never replace it. Otherwise add the listed remote, then `git fetch <remote> student`. Retry once with `gh auth setup-git` only for an authentication failure. A missing branch or failed fetch stops; never use a stale fetched ref. Retain a newly added remote for a safe retry. A remote alone does not mean enrollment succeeded. If `git merge-base --is-ancestor <remote>/student HEAD` succeeds, the published edition is already present: do not merge again; proceed to step 7. If there is a common ancestor but newer program commits, follow `aibl-update`.
+4. **Inspect the exact incoming tree.** Run `git ls-tree -r <remote>/student`. Workforce may supply only `course/workforce/`, `workforce/`, `.claude/agents/`, `.codex/agents/`, `.claude/skills/`, `.agents/skills/`, and `.aibl/programs/agent-workforce.json`. Reject symlinks/submodules, root instructions/settings, personal folders, the four template-owned core skill folders, or paths outside that list. Existing symlinked destination ancestors also stop. Check ignored local files as well as tracked files for collisions; never overwrite them. For another program, require its reviewed file boundary before merging.
+5. **Preview and approve.** List the additions and all tracked overlapping paths; compare overlapping blobs with `git diff HEAD <remote>/student -- <paths>`. Identical overlaps are expected after a package installation. For different files show both versions and ask keep mine, take the program's, or combine specified changes. Explain that taking the program's discards edits in that file; keeping mine omits its incoming fixes. For Chief's personalized name recommend the program's improvements plus the student's original display-name line, only after approval. Preserve role IDs and TOML syntax. Do not silently rewrite any other customization. Record the choices in the conversation, then obtain approval for the whole preview. Pin the reviewed branch's commit with `git rev-parse <remote>/student`; ref movement or changed local state requires a new preview.
+6. **Merge the reviewed edition.** Recheck cleanliness and the reviewed ref, then `git merge --allow-unrelated-histories --no-ff --no-commit <remote>/student`. Resolve only approved collisions using `git checkout --ours -- <file>` or `git checkout --theirs -- <file>`, or the specifically approved combination, then `git add -- <file>`. A surprise collision stops for a decision. Show `git diff --cached` and commit the approved result with `git commit -m "Add Agent Workforce"` (use the selected program's name). If the student cancels while the merge is unfinished, `git merge --abort` restores the clean pre-merge state. Retain historical `.aibl` package records unchanged: they describe the old installation, not the now-updated Git files. Do not run package repair/update after Git adoption.
+7. **Verify and start.** Inspect the commit and verify personal files, settings, and root instructions were unchanged. Report the installed student-branch commit and any deliberately retained customizations. Do not claim installation means a worker ran. Ask the student to start a new session in the same folder, then run `aibl-workforce` (slash skill in Claude, dollar-sign skill in Codex). Check actual named-agent discovery and a real response using the installed program's supported instructions. Missing discovery stops for diagnosis; never copy/link agents into global folders. Offer `aibl-checkpoint` for the student's private origin, separately from enrollment.
 
-## Rules
-
-- Merge only from the program's `student` branch. Never `main`, never a tag someone pastes.
-- Never merge without the yes in step 3, and never merge over a dirty working tree.
-- Never delete or rewrite anything the student made. If a merge stops with conflicts, do not resolve them here: say what conflicted, run `git merge --abort`, and point them to `aibl-update`, which handles conflicts file by file.
-- Never push to any remote except `origin`, and only through `aibl-checkpoint`.
+Never merge `main`, change permissions, send work, manufacture setup records, or push to a program remote. Student approval covers only the exact preview.
 
 ## Attribution
 
