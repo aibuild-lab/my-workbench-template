@@ -35,6 +35,8 @@ Every AI Build Lab program you join lands inside this same folder. You never set
 
 ## Updates
 
+On every new conversation the workbench checks each connected program's `student` branch (fetch only, never a pull) and says when an update is waiting, the way Camp's update check does; `.claude/hooks/session-update-check.mjs`, wired in `.claude/settings.json`.
+
 Each program you connect is a remote of this folder, and the course team moves its `student` branch forward when they publish; `aibl-update` fetches that branch, shows you what changed component by component, and merges it in after your yes. The program's files live in this project folder, while `~/.claude/agents/` holds only links back to them, so the desktop app's `@` dropdown finds your agents from any thread. After every enroll or update the skill rebuilds the registry, refreshes those links, and asks your Chief of Staff "Who are you?" so you know the update is live and not just on disk.
 
 ```mermaid
