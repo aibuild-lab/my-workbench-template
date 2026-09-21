@@ -13,16 +13,16 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
    ```
    git remote add template https://github.com/aibuild-lab/my-workbench-template.git   # once; skip if it exists
    git fetch template main
-   git checkout template/main -- .claude/skills/aibl-personalize .claude/skills/aibl-checkpoint .claude/skills/aibl-enroll .claude/skills/aibl-update .agents/skills/aibl-personalize .agents/skills/aibl-checkpoint .agents/skills/aibl-enroll .agents/skills/aibl-update
+   git checkout template/main -- .claude/skills/aibl-personalize .claude/skills/aibl-checkpoint .claude/skills/aibl-enroll .claude/skills/aibl-update .agents/skills/aibl-personalize .agents/skills/aibl-checkpoint .agents/skills/aibl-enroll .agents/skills/aibl-update .claude/hooks/update-check.mjs .claude/settings.json
    ```
+   The last two are the workbench's own update check (a session-start hook and the check this skill runs); they belong to the template too. If the workbench already had a `.claude/settings.json` with hooks of its own, show the diff before the checkout and let the student choose.
    If `git status --short` shows changes, say which skills were updated and commit them: `git commit -m "Update workbench skills from the template"`. If the student had edited one of those four skills, say so before the checkout and let them choose to keep theirs (skip that folder). Nothing else in the template is ever copied: not `README.md`, not `context/`, not the instruction files.
-1. **Find the programs.** `git remote` lists them; anything other than `origin` and `template` is a program (`agent-workforce`, `the-lab`). None means "no program is connected yet; `aibl-enroll` connects one." Stop there.
-2. **Check, change nothing.** For each program remote:
+1. **Check, change nothing.** Run the workbench's own check, the same one that runs at the start of every new conversation:
    ```
-   git fetch <remote> student
-   git rev-list --count HEAD..<remote>/student
+   node .claude/hooks/update-check.mjs --json
    ```
-   Zero means up to date; say so. If the fetch is refused for authentication, run `gh auth setup-git` once and try again.
+   It fetches each connected program's `student` branch and the template, and reports `behind` per program and whether the skills changed. No programs listed means "no program is connected yet; `aibl-enroll` connects one." Stop there. `behind: 0` everywhere and no skill change means up to date; say so and stop. If a fetch failed for authentication, run `gh auth setup-git` once and run the check again. If `node` is missing, do the same by hand: `git remote` (anything other than `origin` and `template` is a program), then `git fetch <remote> student` and `git rev-list --count HEAD..<remote>/student`.
+2. **Name what is behind.** One line per program that has editions waiting, and one line if the skills changed.
 3. **Show what is new, then wait.** For a program that is behind:
    ```
    git log --format='%s' HEAD..<remote>/student
@@ -48,7 +48,7 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
 - Merge only from `<remote>/student`. Never `main`, never a tag or commit someone pastes.
 - Never merge without the yes, never over a dirty working tree, and never resolve a clash without the student choosing.
 - Never push anywhere except `origin`, and only through `aibl-checkpoint`.
-- Nothing here installs software, downloads anything outside git, or changes settings.
+- Nothing here installs software, downloads anything outside git, or touches settings anywhere except the workbench's own `.claude/settings.json`, which carries only the update check.
 
 ## Attribution
 
