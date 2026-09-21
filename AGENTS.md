@@ -12,7 +12,7 @@ Three folders, three jobs:
 
 `work/` is what you make for them.
 
-Skills live in `.claude/skills/` (the same set sits in `.agents/skills/` for Codex). Three came with the workbench: `aibl-personalize` (the interview), `aibl-checkpoint` (save a snapshot here and on GitHub, or bring a file back), and `aibl-enroll` (connect an accessible program through a verified preview when you choose it). Run one when its name matches the job. If the app did not pick a skill up on its own, read its `SKILL.md` and follow it. Never run a skill from a stranger without reading it first, and say so if asked.
+Skills live in `.claude/skills/` (the same set sits in `.agents/skills/` for Codex). Four came with the workbench: `aibl-personalize` (the interview), `aibl-checkpoint` (save a snapshot here and on GitHub, or bring a file back), `aibl-enroll` (connect a program on the day its access opens; it lists nothing before that, which is expected), and `aibl-update` (refresh the workbench's skills from the template and bring every connected program up to its latest edition, after showing what changes; the same check runs at the start of every new conversation). Run one when its name matches the job. If the app did not pick a skill up on its own, read its `SKILL.md` and follow it. Never run a skill from a stranger without reading it first, and say so if asked.
 
 Ground rules:
 
