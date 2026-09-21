@@ -14,7 +14,6 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
    ```
    git remote get-url template >/dev/null 2>&1 || git remote add template https://github.com/aibuild-lab/my-workbench-template.git
    git fetch template main
-   git checkout template/main -- .claude/skills/aibl-personalize .claude/skills/aibl-checkpoint .claude/skills/aibl-enroll .claude/skills/aibl-update .agents/skills/aibl-personalize .agents/skills/aibl-checkpoint .agents/skills/aibl-enroll .agents/skills/aibl-update .claude/hooks/update-check.mjs
    ```
    For each skill folder, first run `git diff --quiet HEAD template/main -- <folder>`. If it differs, show `git diff HEAD template/main -- <folder>` and ask whether to keep the workbench version or take the template version. It may be an older template skill or a committed student edit, so never guess. Skip folders the student keeps; run the checkout only for folders they approve. The hook is the workbench's read-only update check. If `.claude/settings.json` is absent, copy the template's file too. If it already exists, leave it unchanged so its hooks and preferences are preserved; the student can still run this skill directly. If `git status --short` shows changes, say which approved skills were updated and commit them: `git commit -m "Update workbench skills from the template"`. Nothing else in the template is ever copied: not `README.md`, not `context/`, not the instruction files.
 2. **Check, change nothing.** Run the workbench's own check, the same one that runs at the start of every new conversation:
@@ -33,7 +32,7 @@ Each connected program is a remote of this workbench (added by `aibl-enroll`) wh
    ```
    git merge --no-edit <remote>/student
    ```
-   Clean merge: go to step 6.
+   Clean merge: go to step 7.
 6. **A clash, one file at a time.** If git stops with conflicts, list them with `git diff --name-only --diff-filter=U`. For each file, show the student both versions in plain words (theirs is the program's new text, ours is what they wrote) and ask: keep mine, or take the program's? Then:
    ```
    git checkout --ours -- <file>      # keep mine

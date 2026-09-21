@@ -2,6 +2,8 @@
 set -eu
 root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
+template_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if grep -F 'git checkout template/main -- .claude/skills/aibl-personalize' "$template_root/.claude/skills/aibl-update/SKILL.md"; then exit 1; fi
 template="$root/template"
 workbench="$root/workbench"
 mkdir -p "$template/.claude/skills/aibl-update" "$template/.claude/skills/aibl-enroll" "$workbench/.claude/skills/aibl-update" "$workbench/.claude/skills/aibl-enroll"
