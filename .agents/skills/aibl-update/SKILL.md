@@ -1,54 +1,28 @@
 ---
 name: aibl-update
-description: Update your programs. Checks every program connected to this workbench for a newer edition, shows what would change, and merges it in after a yes. Your own files are never overwritten; a clash is settled one file at a time, your call.
+description: Show available workbench and program changes, preserve your customizations, and apply only the changes you approve.
 ---
 
-# Update your programs
+# Update your workbench and programs
 
-Each connected program is a remote of this workbench (added by `aibl-enroll`) whose `student` branch the course team moves forward when they publish. Updating is fetching that branch and merging it. The commit messages on the branch are the release notes.
+Use the existing workbench. Program updates come from each approved remote's `student` branch. Commit messages are release notes. Enrollment and package-to-Git adoption use `aibl-enroll` first.
 
-## What to do
+## Steps
 
-0. **Refresh the workbench's own skills first.** The four `aibl-` skills come from the public template, and the template is not a program: it is never merged, only its skill folders are copied. From the workbench folder:
-   ```
-   git remote add template https://github.com/aibuild-lab/my-workbench-template.git   # once; skip if it exists
-   git fetch template main
-   git checkout template/main -- .claude/skills/aibl-personalize .claude/skills/aibl-checkpoint .claude/skills/aibl-enroll .claude/skills/aibl-update .agents/skills/aibl-personalize .agents/skills/aibl-checkpoint .agents/skills/aibl-enroll .agents/skills/aibl-update .claude/hooks/update-check.mjs .claude/settings.json
-   ```
-   The last two are the workbench's own update check (a session-start hook and the check this skill runs); they belong to the template too. If the workbench already had a `.claude/settings.json` with hooks of its own, show the diff before the checkout and let the student choose.
-   If `git status --short` shows changes, say which skills were updated and commit them: `git commit -m "Update workbench skills from the template"`. If the student had edited one of those four skills, say so before the checkout and let them choose to keep theirs (skip that folder). Nothing else in the template is ever copied: not `README.md`, not `context/`, not the instruction files.
-1. **Check, change nothing.** Run the workbench's own check, the same one that runs at the start of every new conversation:
-   ```
-   node .claude/hooks/update-check.mjs --json
-   ```
-   It fetches each connected program's `student` branch and the template, and reports `behind` per program and whether the skills changed. No programs listed means "no program is connected yet; `aibl-enroll` connects one." Stop there. `behind: 0` everywhere and no skill change means up to date; say so and stop. If a fetch failed for authentication, run `gh auth setup-git` once and run the check again. If `node` is missing, do the same by hand: `git remote` (anything other than `origin` and `template` is a program), then `git fetch <remote> student` and `git rev-list --count HEAD..<remote>/student`.
-2. **Name what is behind.** One line per program that has editions waiting, and one line if the skills changed.
-3. **Show what is new, then wait.** For a program that is behind:
-   ```
-   git log --format='%s' HEAD..<remote>/student
-   git diff --stat HEAD...<remote>/student
-   ```
-   Read that out in plain words: how many editions behind, what the team said changed, which files are added, changed or removed. Point out any file the student has edited themselves that the update also changes (`git diff --name-only HEAD...<remote>/student` against `git log --format= --name-only <remote>/student..HEAD`). Ask for a yes before merging. If the working tree is not clean, ask them to save first (offer `aibl-checkpoint`); never stash or discard for them.
-4. **Merge.** Only after the yes:
-   ```
-   git merge --no-edit <remote>/student
-   ```
-   Clean merge: go to step 6.
-5. **A clash, one file at a time.** If git stops with conflicts, list them with `git diff --name-only --diff-filter=U`. For each file, show the student both versions in plain words (theirs is the program's new text, ours is what they wrote) and ask: keep mine, or take the program's? Then:
-   ```
-   git checkout --ours -- <file>      # keep mine
-   git checkout --theirs -- <file>    # take the program's
-   git add <file>
-   ```
-   When every file is settled, `git commit --no-edit`. Never pick for them, never merge the two texts yourself, and never `git merge --abort` unless they ask to stop; if they do, abort and say nothing changed.
-6. **Show what landed and save.** `git show --stat HEAD` in plain words, then say that `context/`, `work/` and `library/` did not change (they never do; the program never contains them). Offer `aibl-checkpoint`. Then: start a new session in this folder so the app reloads any updated skills.
+1. **Check location and work.** Follow `aibl-enroll` step 1 to verify the workbench and private origin. `git status --porcelain --untracked-files=all` must be empty. Otherwise stop for `aibl-checkpoint`; never stash, discard, or reset. Record the starting commit for recovery.
+2. **Refresh core skills only after choices.** Use the exact `template` remote `https://github.com/aibuild-lab/my-workbench-template.git` (equivalent GitHub SSH URL is allowed); stop on an existing different URL. Fetch `main`, and pin the fetched commit for this preview. List the four supplied core folders (`aibl-personalize`, `aibl-checkpoint`, `aibl-enroll`, `aibl-update`) under both `.claude/skills/` and `.agents/skills/`, and `.claude/hooks/update-check.mjs`. For each differing path show `git diff HEAD template/main -- <path>` and ask keep mine or take template. Treat committed differences as possible customization, not permission to replace. Reject symlinked destinations and existing ignored/untracked collisions. Only after approval use `git checkout template/main -- <path>`. Skip kept paths. Stage and commit only the approved paths; never bulk-checkout the template. Do not fetch a different revision between preview and apply.
+3. **Preserve settings.** If `.claude/settings.json` is absent, offer the template's setting as a separate approved addition after checking for ignored/symlink collisions. If present, leave it unchanged. Explain that the copied hook is not active unless the existing configuration invokes it. The student may approve adding only the missing SessionStart hook entry after seeing the JSON diff; preserve every existing key and hook and avoid duplicates. Invalid JSON stops the settings change. Otherwise the explicit check works without changing settings. This Claude hook does not establish a Codex session-start hook.
+4. **Check connected programs.** Run `node .claude/hooks/update-check.mjs --json`. If Node or the hook is unavailable, manually check only the known program remotes in `aibl-enroll`, verifying URL and fetching `student` before counting commits. Unknown remotes are not programs. A failed or empty check is unknown, never up to date. A remote with no common history is not yet enrolled: use `aibl-enroll`. No connected programs means offer enrollment. Zero pending commits means no program update; report any core changes separately.
+5. **Explain the program changes.** For each connected program with a newer edition, read `git log --format='%s' HEAD..<remote>/student` and `git diff --stat HEAD...<remote>/student`. Apply the enrollment tree and collision checks to the incoming branch and its changed/deleted paths. Reject any change to personal folders, root instructions/settings, or template-owned core skills. Compare `workforce/VERSIONS.json` when supplied, otherwise the `components` in `.aibl/programs/agent-workforce.json`. Match components by ID; show additions, removals and changed versions/fingerprints. Missing or pending versions remain unknown; show exact Git revisions instead of inventing numbers. Never edit publisher version records or treat their presence as approval. Compare student edits since the common ancestor against incoming changes, including deleted supplied files. Explain likely conflicts without promising Git will conflict on every overlapping edit. Recommend incoming fixes for unchanged supplied files and explicit choices for personalized files.
+6. **Approve and merge.** Save the pre-update commit and exact fetched commit, show the preview, and obtain a yes. Recheck the worktree and ref. Run `git merge --no-ff --no-commit <remote>/student`. For conflicts offer keep mine, take the program's, or combine specifically approved changes, explaining each cost. Resolve only chosen paths, then stage them. For Chief's name, show the old personalized display-name line and propose preserving it in the updated Claude or Codex definition without changing agent IDs, syntax, or role instructions. Never infer a name from a filename or rewrite other edits. Show the staged diff before committing. If canceled before commit, `git merge --abort`; after commit offer a separately approved Git revert of this update, never a reset of student history.
+7. **Verify what arrived.** Inspect the actual diff against the saved pre-update commit and verify personal files, settings, and Chief's approved name. Report exact revisions, changed components, and any kept customizations; version metadata alone cannot describe a customized file. Preserve historical package receipts, and never run package repair/update on Git-managed course files. Offer a checkpoint to the student's private origin only. Start a new session in the same folder and verify an actual named-agent response through the installed supported route. Do not install global agent links, switch clients, or call file presence runtime success.
 
 ## Rules
 
-- Merge only from `<remote>/student`. Never `main`, never a tag or commit someone pastes.
-- Never merge without the yes, never over a dirty working tree, and never resolve a clash without the student choosing.
-- Never push anywhere except `origin`, and only through `aibl-checkpoint`.
-- Nothing here installs software, downloads anything outside git, or touches settings anywhere except the workbench's own `.claude/settings.json`, which carries only the update check.
+- Program merges use only verified `<remote>/student`; `template/main` is used only for the approved core-file refresh.
+- Never merge over a dirty tree, overwrite ignored files, resolve a surprise conflict, or apply a changed preview without a new decision.
+- Never push except through the student's separately requested checkpoint to their private `origin`.
+- Nothing here installs software, grants access, changes global settings, or sends work.
 
 ## Attribution
 

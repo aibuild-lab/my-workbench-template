@@ -27,7 +27,7 @@ const MARKER_DIR = path.join(os.tmpdir(), "aibl-workbench-update-check");
 const MARKER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const GIT_TIMEOUT_MS = Number(process.env.AIBL_UPDATE_CHECK_TIMEOUT_MS || 20000);
 const PROGRAM_BRANCH = "student";
-const NOT_PROGRAMS = new Set(["origin", "template"]);
+const PROGRAMS = new Set(["agent-workforce", "the-lab"]);
 const LABELS = { "agent-workforce": "Agent Workforce", "the-lab": "The Lab" };
 const SKILL_FOLDERS = ["aibl-personalize", "aibl-checkpoint", "aibl-enroll", "aibl-update"]
   .flatMap((name) => [`.claude/skills/${name}`, `.agents/skills/${name}`]);
@@ -71,12 +71,25 @@ function check(root) {
   const remotes = git(root, ["remote"]).split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const programs = [];
   for (const remote of remotes) {
-    if (NOT_PROGRAMS.has(remote)) continue;
-    const row = { remote, label: LABELS[remote] || remote, behind: null, latest: null, error: null };
+    if (!PROGRAMS.has(remote)) continue;
+    const row = { remote, label: LABELS[remote] || remote, behind: null, latest: null, joined: null, error: null };
+    const url = git(root, ["remote", "get-url", remote]);
+    if (!isOfficialRemote(url, remote)) {
+      row.error = "remote_mismatch";
+      programs.push(row);
+      continue;
+    }
     const fetched = spawnSync("git", ["fetch", "-q", remote, PROGRAM_BRANCH], gitOptions(root));
     if (fetched.status !== 0) {
       row.error = "fetch_failed";
     } else {
+      const common = spawnSync("git", ["merge-base", "HEAD", `${remote}/${PROGRAM_BRANCH}`], gitOptions(root));
+      row.joined = common.status === 0;
+      if (!row.joined) {
+        row.error = common.status === 1 ? "enrollment_required" : "history_check_failed";
+        programs.push(row);
+        continue;
+      }
       const count = git(root, ["rev-list", "--count", `HEAD..${remote}/${PROGRAM_BRANCH}`]);
       row.behind = Number.parseInt(count, 10);
       if (!Number.isFinite(row.behind)) row.behind = null;
@@ -85,7 +98,9 @@ function check(root) {
     programs.push(row);
   }
   let skills = { present: remotes.includes("template"), changed: null, error: null };
-  if (skills.present) {
+  if (skills.present && !isOfficialRemote(git(root, ["remote", "get-url", "template"]), "my-workbench-template")) {
+    skills.error = "remote_mismatch";
+  } else if (skills.present) {
     const fetched = spawnSync("git", ["fetch", "-q", "template", "main"], gitOptions(root));
     if (fetched.status !== 0) {
       skills.error = "fetch_failed";
@@ -96,6 +111,12 @@ function check(root) {
     }
   }
   return { status: "checked", workbench: root, checked_at: new Date().toISOString(), programs, skills };
+}
+
+function isOfficialRemote(url, repository) {
+  return [`https://github.com/aibuild-lab/${repository}`, `https://github.com/aibuild-lab/${repository}.git`,
+    `git@github.com:aibuild-lab/${repository}.git`, `git@github.com:aibuild-lab/${repository}`,
+    `ssh://git@github.com/aibuild-lab/${repository}.git`, `ssh://git@github.com/aibuild-lab/${repository}`].includes(url.trim());
 }
 
 function describe(report) {

@@ -12,7 +12,7 @@ This is your workbench: one private folder where you and your agent do your work
 - `.claude/skills/` and `.agents/skills/`: your skills, the same set for both apps.
 - `.aibl/`: housekeeping. Leave it alone.
 
-## Three skills came with it
+## Four skills come with current workbenches
 
 Type a forward slash in the Claude app, or a dollar sign in the Codex app, and you will see them.
 
@@ -32,3 +32,19 @@ Open any of them and read it. A skill is a folder with one file in it, `SKILL.md
 ## When a program starts, and when it changes
 
 Every AI Build Lab program you join lands inside this same folder. You never set up a second one. On the day your access opens, run `aibl-enroll`: it shows you what the program adds, you say yes, and it merges the program's files in next to yours. When the course team publishes a change, `aibl-update` shows you what changed and merges it in the same way. Your `context`, `library` and `work` folders are yours; a program never contains them.
+
+
+## From Essentials to Workforce
+
+Open your existing `my-workbench`. If its skills are older, use the official
+[update prompt](https://github.com/aibuild-lab/aibl-installer/blob/main/START-HERE.md#later-update-your-workbench).
+Run `aibl-enroll`, choose Workforce, review the changes, and approve them.
+Workforce comes from `aibuild-lab/agent-workforce`, branch `student`.
+Start a new session in this folder and run `aibl-workforce`.
+If access fails, check the signed-in GitHub account with the team; Learn access
+and repository access are separate. Keep existing Camp/OS folders separate.
+
+Already installed a Workforce package? Enrollment compares its files with the
+student branch and asks about differences before joining. Keep the old receipts;
+future course updates use `aibl-update`, not package repair. It reports changes,
+preserves settings and personal work, and asks before applying anything.
