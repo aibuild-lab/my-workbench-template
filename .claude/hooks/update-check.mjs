@@ -93,7 +93,14 @@ function check(root) {
       const count = git(root, ["rev-list", "--count", `HEAD..${remote}/${PROGRAM_BRANCH}`]);
       row.behind = Number.parseInt(count, 10);
       if (!Number.isFinite(row.behind)) row.behind = null;
-      if (row.behind > 0) row.latest = sanitize(git(root, ["log", "-1", "--format=%s", `${remote}/${PROGRAM_BRANCH}`]));
+      if (row.behind > 0) {
+        // Tyler's #7: read what is actually waiting, not only the newest
+        // subject. A student three editions behind should see all three.
+        // Capped at three so one line stays one line.
+        const notes = git(root, ["log", "--format=%s", `HEAD..${remote}/${PROGRAM_BRANCH}`]);
+        row.notes = String(notes).trim().split("\n").map(sanitize).filter(Boolean).slice(0, 3);
+        row.latest = row.notes[0] || null;
+      }
     }
     programs.push(row);
   }
@@ -125,7 +132,9 @@ function describe(report) {
   for (const p of report.programs) {
     if (p.behind > 0) {
       const editions = p.behind === 1 ? "1 new edition" : `${p.behind} new editions`;
-      parts.push(`${p.label} has ${editions}${p.latest ? ` (latest: "${p.latest}")` : ""}`);
+      const notes = (p.notes && p.notes.length) ? p.notes : (p.latest ? [p.latest] : []);
+      const published = notes.length ? ` (what the team published: ${notes.map((n) => `"${n}"`).join("; ")})` : "";
+      parts.push(`${p.label} has ${editions}${published}`);
     }
   }
   if (report.skills.changed) parts.push("the workbench skills have an update from the template");
