@@ -6,9 +6,14 @@
 //     template have published, and say in one sentence whether anything is waiting.
 //   node .claude/hooks/update-check.mjs --json
 //     the same check as a report; this is what aibl-update reads before it acts.
+//   node .claude/hooks/update-check.mjs --agent-menu [--agent-menu-apply]
+//     whether Claude Code's @ agent menu lists this workbench's aibl- agents (see "The
+//     Claude Code agent menu" below); the hook adds one line when it does not.
 //
 // Rules, borrowed from the Camp update check that ran for months:
 //   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
+//      Its one write is --agent-menu-apply, outside the workbench, which aibl-update and
+//      aibl-enroll run only after the student's yes. The hook itself never writes.
 //   2. It never blocks a session: every path exits 0, and a broken check stays quiet.
 //   3. New conversations only. resume, compact and fork continue one that already heard
 //      the answer; a subagent lives inside a conversation that already heard it.
@@ -31,12 +36,22 @@ const PROGRAMS = new Set(["agent-workforce", "the-lab"]);
 const LABELS = { "agent-workforce": "Agent Workforce", "the-lab": "The Lab" };
 const SKILL_FOLDERS = ["aibl-personalize", "aibl-checkpoint", "aibl-enroll", "aibl-update"]
   .flatMap((name) => [`.claude/skills/${name}`, `.agents/skills/${name}`]);
+// the agent menu's files (see "The Claude Code agent menu"); declared up here because main() runs below
+const AGENT_FILE = /^aibl-[a-z0-9-]+\.md$/;
 
 main();
 
 function main() {
   try {
-    if (process.argv.includes("--json") || process.argv.includes("--check")) {
+    if (process.argv.includes("--agent-menu-apply")) {
+      const root = resolveRoot({});
+      const report = root ? applyAgentMenu(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--agent-menu")) {
+      const root = resolveRoot({});
+      const report = root ? agentMenu(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--json") || process.argv.includes("--check")) {
       const root = resolveRoot({});
       const report = root ? check(root) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
@@ -59,8 +74,8 @@ function hook() {
   if (!root) return;
   if (!claimThisConversation(payload.session_id, root)) return;
   const report = check(root);
-  const sentence = describe(report);
-  if (sentence) emit(sentence);
+  const sentences = [describe(report), describeAgentMenu(agentMenu(root))].filter(Boolean);
+  if (sentences.length) emit(sentences.join(" "));
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +156,109 @@ function describe(report) {
   if (!parts.length) return null;
   return `AIBL workbench update check, nothing was changed: ${parts.join("; ")}. ` +
     "Tell the student in one line and offer aibl-update, which shows what changes before merging. Do not run it unasked.";
+}
+
+// ---------------------------------------------------------------------------
+// The Claude Code agent menu
+// ---------------------------------------------------------------------------
+//
+// Claude Code desktop's @ menu lists agents only from the user's own agents folder
+// (~/.claude/agents on a Mac, .claude\agents in the user folder on Windows), never from
+// the workbench's .claude/agents. With the same name in both, the menu shows the user
+// folder's entry but the workbench file is what runs; an entry with no workbench match
+// runs its own copy. Probe-tested on Mac and Windows, 09-24-2026. So what matters is
+// the NAMES: every aibl- agent here has an entry there, and no retired aibl- entry is
+// left behind. --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or
+// aibl-enroll runs it, after the student's yes. It touches aibl-*.md in that one
+// folder and nothing else, never writes through a link, and moves leftovers to a
+// dated backup folder instead of deleting them.
+
+function menuFolder() {
+  return path.join(os.homedir(), ".claude", "agents");
+}
+
+function agentFiles(folder) {
+  try {
+    return fs.readdirSync(folder).filter((name) => AGENT_FILE.test(name)).sort();
+  } catch {
+    return [];
+  }
+}
+
+function sameBytes(a, b) {
+  try {
+    return fs.readFileSync(a).equals(fs.readFileSync(b));
+  } catch {
+    return false;
+  }
+}
+
+function isLink(file) {
+  try { return fs.lstatSync(file).isSymbolicLink(); } catch { return false; }
+}
+
+function agentMenu(root) {
+  const source = path.join(root, ".claude", "agents");
+  const menu = menuFolder();
+  const here = agentFiles(source).filter((name) => {
+    try { return fs.lstatSync(path.join(source, name)).isFile(); } catch { return false; }
+  });
+  if (!here.length) return { status: "no_agents", workbench: root, menu_folder: menu, missing: [], changed: [], leftover: [] };
+  const there = agentFiles(menu);
+  const missing = here.filter((name) => !there.includes(name));
+  // content only changes the description the menu shows; the workbench file runs
+  const changed = here.filter((name) => there.includes(name) && !sameBytes(path.join(source, name), path.join(menu, name)));
+  const leftover = there.filter((name) => !here.includes(name));
+  const inStep = !missing.length && !leftover.length;
+  return { status: inStep ? "in_step" : "out_of_step", workbench: root, menu_folder: menu, missing, changed, leftover };
+}
+
+function applyAgentMenu(root) {
+  const plan = agentMenu(root);
+  if (plan.status === "no_agents") return plan;
+  const source = path.join(root, ".claude", "agents");
+  const menu = plan.menu_folder;
+  const done = { copied: [], removed_to: null, removed: [], errors: [] };
+  fs.mkdirSync(menu, { recursive: true });
+  for (const name of [...plan.missing, ...plan.changed]) {
+    const dest = path.join(menu, name);
+    try {
+      // copyFile onto a link would overwrite whatever the link points at
+      if (isLink(dest)) fs.unlinkSync(dest);
+      fs.copyFileSync(path.join(source, name), dest);
+      done.copied.push(name);
+    } catch (error) {
+      done.errors.push(`${name}: ${error.code || "copy_failed"}`);
+    }
+  }
+  if (plan.leftover.length) {
+    // outside the agents folder, so the menu cannot pick the backup up
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backup = path.join(os.homedir(), ".claude", "aibl-agent-menu-removed", stamp);
+    for (const name of plan.leftover) {
+      try {
+        fs.mkdirSync(backup, { recursive: true });
+        fs.renameSync(path.join(menu, name), path.join(backup, name));
+        done.removed.push(name);
+        done.removed_to = backup;
+      } catch (error) {
+        done.errors.push(`${name}: ${error.code || "move_failed"}`);
+      }
+    }
+  }
+  return { ...agentMenu(root), applied: done, next: "Quit the app fully and open it again: the menu reads this folder only at launch. Then start a new thread before typing @." };
+}
+
+function describeAgentMenu(menu) {
+  if (!menu || menu.status !== "out_of_step") return null;
+  const bits = [];
+  if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
+  if (menu.leftover.length) bits.push(`left over in the menu from a retired or renamed seat: ${menu.leftover.join(", ")}`);
+  return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
+    "Tell the student in one line that Claude Code's @ menu only lists agents from their user folder, and offer to fix it. " +
+    "Show them `node .claude/hooks/update-check.mjs --agent-menu`, and only on their yes run " +
+    "`node .claude/hooks/update-check.mjs --agent-menu-apply`, then tell them to quit the app fully and reopen it. " +
+    "If they would rather not, drop it for this conversation.";
 }
 
 // ---------------------------------------------------------------------------
