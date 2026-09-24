@@ -10,6 +10,9 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
 # never moved: the terminal Chief aibl-bridge-setup renders (#96), the student's own seat, a second workbench's
 NOT_OURS = ["aibl-chief-of-staff-lead.md", "aibl-my-own-seat.md", "aibl-other-workbench.md"]
+# a real course name (the hook only ever moves names on its allowlist): this fixture's course
+# shipped it in edition one and retired it in edition two
+RETIRED = "aibl-echo.md"
 
 
 class AgentMenu(unittest.TestCase):
@@ -18,16 +21,16 @@ class AgentMenu(unittest.TestCase):
         base = Path(self.temp.name)
         self.wb = base / "workbench"
         self.home = base / "home"
-        # the course: its published student branch shipped aibl-retired-seat, then retired it
+        # the course: its published student branch shipped aibl-echo, then retired it
         course = base / "course"
         (course / ".claude" / "agents").mkdir(parents=True)
         cagents = course / ".claude" / "agents"
         (cagents / "aibl-chief-of-staff.md").write_text("chief v2\n")
         (cagents / "aibl-the-professor.md").write_text("professor\n")
-        (cagents / "aibl-retired-seat.md").write_text("old seat\n")
+        (cagents / RETIRED).write_text("old seat\n")
         self.git_in(course, "init", "-q", "-b", "student")
         self.commit_in(course, "edition one")
-        (cagents / "aibl-retired-seat.md").unlink()
+        (cagents / RETIRED).unlink()
         self.commit_in(course, "edition two")
         # the student's workbench, joined to that program
         agents = self.wb / ".claude" / "agents"
@@ -47,7 +50,7 @@ class AgentMenu(unittest.TestCase):
         self.menu = self.home / ".claude" / "agents"
         self.menu.mkdir(parents=True)
         (self.menu / "aibl-chief-of-staff.md").write_text("chief v1\n")      # changed
-        (self.menu / "aibl-retired-seat.md").write_text("old seat\n")        # leftover: the course shipped it
+        (self.menu / RETIRED).write_text("old seat\n")                       # leftover: the course shipped it
         (self.menu / "aibl-other-workbench.md").write_text("theirs\n")      # aibl- but never shipped
         (self.menu / "aibl-my-own-seat.md").write_text("the student's own\n")   # the student's, not ours
         (self.menu / "aibl-chief-of-staff-lead.md").write_text("terminal Chief\n")  # rendered locally (#96)
@@ -82,7 +85,7 @@ class AgentMenu(unittest.TestCase):
         self.assertEqual(report["status"], "out_of_step")
         self.assertEqual(report["missing"], ["aibl-the-professor.md"])
         self.assertEqual(report["changed"], ["aibl-chief-of-staff.md"])
-        self.assertEqual(report["leftover"], ["aibl-retired-seat.md"])
+        self.assertEqual(report["leftover"], [RETIRED])
         self.assertEqual(report["not_ours"], NOT_OURS)
         self.assertTrue(Path(report["menu_folder"]).samefile(self.menu))
 
@@ -92,7 +95,7 @@ class AgentMenu(unittest.TestCase):
         line = out["hookSpecificOutput"]["additionalContext"]
         self.assertIn("AIBL agent menu check, nothing was changed", line)
         self.assertIn("aibl-the-professor.md", line)
-        self.assertIn("aibl-retired-seat.md", line)
+        self.assertIn(RETIRED, line)
         self.assertIn("older copies in the menu than in this workbench: aibl-chief-of-staff.md", line)
         self.assertNotIn("aibl-other-workbench.md", line)
         self.assertIn("do not hand them the command", line)
@@ -102,15 +105,15 @@ class AgentMenu(unittest.TestCase):
         self.assertEqual(applied["status"], "in_step")
         self.assertEqual((self.menu / "aibl-the-professor.md").read_text(), "professor\n")
         self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "chief v2\n")
-        self.assertFalse((self.menu / "aibl-retired-seat.md").exists())
+        self.assertFalse((self.menu / RETIRED).exists())
         backup = Path(applied["applied"]["removed_to"])
-        self.assertEqual((backup / "aibl-retired-seat.md").read_text(), "old seat\n")
+        self.assertEqual((backup / RETIRED).read_text(), "old seat\n")
         self.assertNotEqual(backup.parent.parent, self.menu.parent / "agents")
         self.assertEqual((self.menu / "someone-elses.md").read_text(), "leave me alone\n")
         self.assertEqual((self.menu / "aibl-other-workbench.md").read_text(), "theirs\n")
         self.assertEqual((self.menu / "aibl-my-own-seat.md").read_text(), "the student's own\n")
         self.assertEqual((self.menu / "aibl-chief-of-staff-lead.md").read_text(), "terminal Chief\n")
-        self.assertEqual(applied["applied"]["removed"], ["aibl-retired-seat.md"])
+        self.assertEqual(applied["applied"]["removed"], [RETIRED])
         self.assertFalse((self.menu / "my-own-helper.md").exists())
         status = subprocess.run(["git", "-C", str(self.wb), "status", "--porcelain"], text=True, capture_output=True)
         self.assertEqual(status.stdout, "")
@@ -135,7 +138,7 @@ class AgentMenu(unittest.TestCase):
 
     def test_changed_contents_alone_count(self):
         # every name present, one copy stale: still out of step (another folder open runs the stale copy)
-        (self.menu / "aibl-retired-seat.md").unlink()
+        (self.menu / RETIRED).unlink()
         (self.menu / "aibl-the-professor.md").write_text("professor\n")
         report = json.loads(self.run_hook("--agent-menu"))
         self.assertEqual((report["status"], report["missing"], report["leftover"]), ("out_of_step", [], []))
@@ -143,7 +146,7 @@ class AgentMenu(unittest.TestCase):
 
     def test_never_ours_alone_is_in_step(self):
         # a second workbench's aibl- entry is never a reason to speak up or move anything
-        (self.menu / "aibl-retired-seat.md").unlink()
+        (self.menu / RETIRED).unlink()
         (self.menu / "aibl-chief-of-staff.md").write_text("chief v2\n")
         (self.menu / "aibl-the-professor.md").write_text("professor\n")
         report = json.loads(self.run_hook("--agent-menu"))
@@ -154,7 +157,7 @@ class AgentMenu(unittest.TestCase):
         self.git("remote", "remove", "agent-workforce")
         report = json.loads(self.run_hook("--agent-menu"))
         self.assertEqual(report["leftover"], [])
-        self.assertIn("aibl-retired-seat.md", report["not_ours"])
+        self.assertIn(RETIRED, report["not_ours"])
 
     def test_no_agents_means_no_line(self):
         for f in (self.wb / ".claude" / "agents").glob("aibl-*.md"):
