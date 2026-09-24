@@ -171,8 +171,8 @@ function describe(report) {
 // identical entry there, and no retired aibl- entry is left behind. --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or
 // aibl-enroll runs it, after the student's yes. It touches aibl-*.md in that one
 // folder and nothing else, never writes through a link, and moves leftovers (only
-// entries this workbench's history once held) to a dated backup folder instead of
-// deleting them.
+// names a program's published branch once shipped) to a dated backup folder instead
+// of deleting them.
 
 function menuFolder() {
   return path.join(os.homedir(), ".claude", "agents");
@@ -209,10 +209,11 @@ function agentMenu(root) {
   const missing = here.filter((name) => !there.includes(name));
   // content only changes the description the menu shows; the workbench file runs
   const changed = here.filter((name) => there.includes(name) && !sameBytes(path.join(source, name), path.join(menu, name)));
-  // A leftover is an entry THIS workbench once shipped and has since retired or renamed.
-  // aibl- entries it never had (a second workbench, another program) are not ours to move
-  // (Gigawatt's review, 09-24): reported as not_ours, never touched.
-  const shipped = shippedBefore(root);
+  // A leftover is an entry the COURSE once shipped and has since retired or renamed.
+  // Anything else (the student's own agents, the terminal Chief aibl-bridge-setup renders
+  // locally, a second workbench's) is not ours to move: reported as not_ours, never
+  // touched (Gigawatt's review and Tyler's ruling 3, 09-24).
+  const shipped = shippedByCourse(root);
   const gone = there.filter((name) => !here.includes(name));
   const leftover = gone.filter((name) => shipped.has(name));
   const notOurs = gone.filter((name) => !shipped.has(name));
@@ -222,10 +223,21 @@ function agentMenu(root) {
     not_ours: notOurs };
 }
 
-function shippedBefore(root) {
-  // every aibl- agent file this workbench's history has ever held, deleted ones included
-  const log = git(root, ["log", "--format=", "--name-only", "--no-renames", "--", ".claude/agents"]);
-  return new Set(log.split(/\r?\n/).map((p) => path.posix.basename(p.trim())).filter((n) => AGENT_FILE.test(n)));
+function shippedByCourse(root) {
+  // every aibl- agent file any connected program's published branch has ever held, retired
+  // ones included. Read from the already-fetched <remote>/student refs; no ref, no names,
+  // so nothing is ever treated as a leftover.
+  const names = new Set();
+  for (const remote of PROGRAMS) {
+    const ref = `refs/remotes/${remote}/${PROGRAM_BRANCH}`;
+    if (!git(root, ["rev-parse", "--verify", "--quiet", ref])) continue;
+    const log = git(root, ["log", "--format=", "--name-only", "--no-renames", ref, "--", ".claude/agents"]);
+    for (const p of log.split(/\r?\n/)) {
+      const name = path.posix.basename(p.trim());
+      if (AGENT_FILE.test(name)) names.add(name);
+    }
+  }
+  return names;
 }
 
 function applyAgentMenu(root) {
