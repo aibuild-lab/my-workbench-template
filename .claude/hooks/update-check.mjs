@@ -166,9 +166,9 @@ function describe(report) {
 // (~/.claude/agents on a Mac, .claude\agents in the user folder on Windows), never from
 // the workbench's .claude/agents. With the same name in both, the menu shows the user
 // folder's entry but the workbench file is what runs; an entry with no workbench match
-// runs its own copy. Probe-tested on Mac and Windows, 09-24-2026. So what matters is
-// the NAMES: every aibl- agent here has an entry there, and no retired aibl- entry is
-// left behind. --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or
+// runs its own copy, and so does any entry picked while another folder is open.
+// Probe-tested on Mac and Windows, 09-24-2026. So: every aibl- agent here has an
+// identical entry there, and no retired aibl- entry is left behind. --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or
 // aibl-enroll runs it, after the student's yes. It touches aibl-*.md in that one
 // folder and nothing else, never writes through a link, and moves leftovers to a
 // dated backup folder instead of deleting them.
@@ -209,7 +209,8 @@ function agentMenu(root) {
   // content only changes the description the menu shows; the workbench file runs
   const changed = here.filter((name) => there.includes(name) && !sameBytes(path.join(source, name), path.join(menu, name)));
   const leftover = there.filter((name) => !here.includes(name));
-  const inStep = !missing.length && !leftover.length;
+  // contents count too: outside this workbench (another folder open) the user-folder copy is what runs
+  const inStep = !missing.length && !changed.length && !leftover.length;
   return { status: inStep ? "in_step" : "out_of_step", workbench: root, menu_folder: menu, missing, changed, leftover };
 }
 
@@ -253,6 +254,7 @@ function describeAgentMenu(menu) {
   if (!menu || menu.status !== "out_of_step") return null;
   const bits = [];
   if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
+  if (menu.changed.length) bits.push(`older copies in the menu than in this workbench: ${menu.changed.join(", ")}`);
   if (menu.leftover.length) bits.push(`left over in the menu from a retired or renamed seat: ${menu.leftover.join(", ")}`);
   return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
     "Tell the student in one line that Claude Code's @ menu only lists agents from their user folder, and offer to fix it. " +

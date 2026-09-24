@@ -61,6 +61,7 @@ class AgentMenu(unittest.TestCase):
         self.assertIn("AIBL agent menu check, nothing was changed", line)
         self.assertIn("aibl-the-professor.md", line)
         self.assertIn("aibl-retired-seat.md", line)
+        self.assertIn("older copies in the menu than in this workbench: aibl-chief-of-staff.md", line)
         self.assertFalse((self.menu / "aibl-the-professor.md").exists())
 
         applied = json.loads(self.run_hook("--agent-menu-apply"))
@@ -93,6 +94,14 @@ class AgentMenu(unittest.TestCase):
         self.assertEqual(victim.read_text(), "another workbench's chief\n")
         self.assertFalse(dest.is_symlink())
         self.assertEqual(dest.read_text(), "chief v2\n")
+
+    def test_changed_contents_alone_count(self):
+        # every name present, one copy stale: still out of step (another folder open runs the stale copy)
+        (self.menu / "aibl-retired-seat.md").unlink()
+        (self.menu / "aibl-the-professor.md").write_text("professor\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["status"], report["missing"], report["leftover"]), ("out_of_step", [], []))
+        self.assertEqual(report["changed"], ["aibl-chief-of-staff.md"])
 
     def test_no_agents_means_no_line(self):
         for f in (self.wb / ".claude" / "agents").glob("aibl-*.md"):
