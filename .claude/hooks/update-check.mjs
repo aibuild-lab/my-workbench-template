@@ -6,9 +6,14 @@
 //     template have published, and say in one sentence whether anything is waiting.
 //   node .claude/hooks/update-check.mjs --json
 //     the same check as a report; this is what aibl-update reads before it acts.
+//   node .claude/hooks/update-check.mjs --agent-menu [--agent-menu-apply]
+//     whether Claude Code's @ agent menu lists this workbench's aibl- agents (see "The
+//     Claude Code agent menu" below); the hook adds one line when it does not.
 //
 // Rules, borrowed from the Camp update check that ran for months:
 //   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
+//      Its one write is --agent-menu-apply, outside the workbench, which aibl-update and
+//      aibl-enroll run only after the student's yes. The hook itself never writes.
 //   2. It never blocks a session: every path exits 0, and a broken check stays quiet.
 //   3. New conversations only. resume, compact and fork continue one that already heard
 //      the answer; a subagent lives inside a conversation that already heard it.
@@ -31,19 +36,33 @@ const PROGRAMS = new Set(["agent-workforce", "the-lab"]);
 const LABELS = { "agent-workforce": "Agent Workforce", "the-lab": "The Lab" };
 const SKILL_FOLDERS = ["aibl-personalize", "aibl-checkpoint", "aibl-enroll", "aibl-update"]
   .flatMap((name) => [`.claude/skills/${name}`, `.agents/skills/${name}`]);
+// the agent menu's files (see "The Claude Code agent menu"); declared up here because main() runs below
+const AGENT_FILE = /^aibl-[a-z0-9-]+\.md$/;
 
 main();
 
 function main() {
   try {
-    if (process.argv.includes("--json") || process.argv.includes("--check")) {
+    if (process.argv.includes("--agent-menu-apply")) {
+      const root = resolveRoot({});
+      const report = root ? applyAgentMenu(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--agent-menu")) {
+      const root = resolveRoot({});
+      const report = root ? agentMenu(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--json") || process.argv.includes("--check")) {
       const root = resolveRoot({});
       const report = root ? check(root) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
     } else {
       hook();
     }
-  } catch {
+  } catch (error) {
+    if (process.argv.some(arg => arg.startsWith("--agent-menu"))) {
+      process.stdout.write(JSON.stringify({ status: "repair_required", error: error.message }) + "\n");
+      process.exit(1);
+    }
     // Fail quiet. A broken update check must never cost a student a session.
   }
   process.exit(0);
@@ -59,8 +78,8 @@ function hook() {
   if (!root) return;
   if (!claimThisConversation(payload.session_id, root)) return;
   const report = check(root);
-  const sentence = describe(report);
-  if (sentence) emit(sentence);
+  const sentences = [describe(report), describeAgentMenu(agentMenu(root))].filter(Boolean);
+  if (sentences.length) emit(sentences.join(" "));
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +112,14 @@ function check(root) {
       const count = git(root, ["rev-list", "--count", `HEAD..${remote}/${PROGRAM_BRANCH}`]);
       row.behind = Number.parseInt(count, 10);
       if (!Number.isFinite(row.behind)) row.behind = null;
-      if (row.behind > 0) row.latest = sanitize(git(root, ["log", "-1", "--format=%s", `${remote}/${PROGRAM_BRANCH}`]));
+      if (row.behind > 0) {
+        // Tyler's #7: read what is actually waiting, not only the newest
+        // subject. A student three editions behind should see all three.
+        // Capped at three so one line stays one line.
+        const notes = git(root, ["log", "--format=%s", `HEAD..${remote}/${PROGRAM_BRANCH}`]);
+        row.notes = String(notes).trim().split("\n").map(sanitize).filter(Boolean).slice(0, 3);
+        row.latest = row.notes[0] || null;
+      }
     }
     programs.push(row);
   }
@@ -125,13 +151,176 @@ function describe(report) {
   for (const p of report.programs) {
     if (p.behind > 0) {
       const editions = p.behind === 1 ? "1 new edition" : `${p.behind} new editions`;
-      parts.push(`${p.label} has ${editions}${p.latest ? ` (latest: "${p.latest}")` : ""}`);
+      const notes = (p.notes && p.notes.length) ? p.notes : (p.latest ? [p.latest] : []);
+      const published = notes.length ? ` (what the team published: ${notes.map((n) => `"${n}"`).join("; ")})` : "";
+      parts.push(`${p.label} has ${editions}${published}`);
     }
   }
   if (report.skills.changed) parts.push("the workbench skills have an update from the template");
   if (!parts.length) return null;
   return `AIBL workbench update check, nothing was changed: ${parts.join("; ")}. ` +
     "Tell the student in one line and offer aibl-update, which shows what changes before merging. Do not run it unasked.";
+}
+
+// ---------------------------------------------------------------------------
+// The Claude Code agent menu
+// ---------------------------------------------------------------------------
+//
+// Claude Code desktop's @ menu lists agents only from the user's own agents folder
+// (~/.claude/agents on a Mac, .claude\agents in the user folder on Windows), never from
+// the workbench's .claude/agents. With the same name in both, the menu shows the user
+// folder's entry but the workbench file is what runs; an entry with no workbench match
+// runs its own copy, and so does any entry picked while another folder is open.
+// Probe-tested on Mac and Windows, 09-24-2026. So: every aibl- agent here has an
+// identical entry there, and no retired aibl- entry is left behind. --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or
+// aibl-enroll runs it, after the student's yes. It touches aibl-*.md in that one
+// folder and nothing else, never writes through a link, and moves leftovers (only
+// names a program's published branch once shipped) to a dated backup folder instead
+// of deleting them.
+
+function menuFolder() {
+  return path.join(os.homedir(), ".claude", "agents");
+}
+
+function agentFiles(folder) {
+  try {
+    return fs.readdirSync(folder).filter((name) => AGENT_FILE.test(name)).sort();
+  } catch {
+    return [];
+  }
+}
+
+function sameBytes(a, b) {
+  try {
+    return fs.readFileSync(a).equals(fs.readFileSync(b));
+  } catch {
+    return false;
+  }
+}
+
+function isLink(file) {
+  try { return fs.lstatSync(file).isSymbolicLink(); } catch { return false; }
+}
+
+function receiptFile() { return path.join(os.homedir(), ".claude", "aibl-agent-menu.json"); }
+function readReceipt() {
+  if (!fs.existsSync(receiptFile())) return { schema: 1, files: {} };
+  if (isLink(receiptFile())) throw new Error("Agent menu receipt must not be a link");
+  const value = JSON.parse(fs.readFileSync(receiptFile(), "utf8"));
+  if (value.schema !== 1 || !value.files || typeof value.files !== "object") throw new Error("Invalid agent menu receipt");
+  return value;
+}
+function fileHash(file) { return createHash("sha256").update(fs.readFileSync(file)).digest("hex"); }
+function shippedByCourse(root) {
+  const shipped = new Map();
+  for (const remote of PROGRAMS) {
+    if (!isOfficialRemote(git(root, ["remote", "get-url", remote]), remote)) continue;
+    const ref = `refs/remotes/${remote}/${PROGRAM_BRANCH}`;
+    if (!git(root, ["rev-parse", "--verify", "--quiet", ref])) continue;
+    const log = git(root, ["log", "--raw", "--format=", "--no-abbrev", "--no-renames", ref, "--", ".claude/agents"]);
+    for (const line of log.split(/\r?\n/)) {
+      const match = line.match(/^:[0-7]+ [0-7]+ ([a-f0-9]+) ([a-f0-9]+) [AMD]\t\.claude\/agents\/(aibl-[a-z0-9-]+\.md)$/);
+      if (!match) continue;
+      if (!shipped.has(match[3])) shipped.set(match[3], new Set());
+      shipped.get(match[3]).add(match[1]).add(match[2]);
+    }
+  }
+  return shipped;
+}
+function agentMenu(root) {
+  const source = path.join(root, ".claude", "agents"), menu = menuFolder();
+  if (isLink(menu) || isLink(path.dirname(menu))) throw new Error("Agent menu directories must not be links");
+  const shipped = shippedByCourse(root), receipt = readReceipt();
+  const here = agentFiles(source).filter(name => shipped.has(name) && fs.lstatSync(path.join(source, name)).isFile());
+  const there = agentFiles(menu);
+  const owned = name => {
+    if (!shipped.has(name)) return false;
+    const file = path.join(menu, name), record = receipt.files[name];
+    if (isLink(file)) {
+      try { return fs.realpathSync(file) === fs.realpathSync(path.join(source, name)); } catch { return false; }
+    }
+    if (!fs.lstatSync(file).isFile()) return false;
+    if (record) return record.workbench === fs.realpathSync(root) && record.sha256 === fileHash(file);
+    // A published blob proves course content, not which workbench owns a global copy.
+    // Pre-receipt copies remain untouched until individually reconciled.
+    return false;
+  };
+  const missing = here.filter(name => !there.includes(name));
+  const changed = here.filter(name => there.includes(name) && owned(name) && !sameBytes(path.join(source, name), path.join(menu, name)));
+  const leftover = there.filter(name => !here.includes(name) && shipped.has(name) && owned(name));
+  const notOurs = there.filter(name => !owned(name));
+  const conflicts = here.filter(name => there.includes(name) && notOurs.includes(name) && !sameBytes(path.join(source, name), path.join(menu, name)));
+  return { status: missing.length || changed.length || leftover.length || conflicts.length ? "out_of_step" : here.length ? "in_step" : "no_agents",
+    workbench: root, menu_folder: menu, missing, changed, leftover, not_ours: notOurs, conflicts };
+}
+function applyAgentMenu(root) {
+  const lock = receiptFile() + ".lock";
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.mkdirSync(lock); // concurrent applies fail closed; session-start never takes this lock
+  try { return applyAgentMenuLocked(root); }
+  finally { fs.rmdirSync(lock); }
+}
+function applyAgentMenuLocked(root) {
+  const plan = agentMenu(root), receipt = readReceipt();
+  const source = path.join(root, ".claude", "agents"), menu = plan.menu_folder;
+  const done = { copied: [], removed_to: null, removed: [], errors: [] };
+  fs.mkdirSync(menu, { recursive: true });
+  const backupParent = path.join(os.homedir(), ".claude", "aibl-agent-menu-removed");
+  if (isLink(backupParent)) throw new Error("Backup directory must not be a link");
+  fs.mkdirSync(backupParent, { recursive: true });
+  const backup = fs.mkdtempSync(path.join(backupParent, new Date().toISOString().replace(/[:.]/g, "-") + "-"));
+  done.backups = {};
+  for (const name of [...plan.missing, ...plan.changed, ...plan.leftover]) {
+    let saved = null;
+    try {
+      const fresh = agentMenu(root);
+      if (![...fresh.missing, ...fresh.changed, ...fresh.leftover].includes(name)) throw new Error("ownership_changed");
+      const dest = path.join(menu, name);
+      if (!plan.missing.includes(name)) {
+        const before = fileHash(dest);
+        saved = path.join(backup, name);
+        fs.renameSync(dest, saved);
+        done.backups[name] = saved;
+        done.removed_to = backup;
+        if (fileHash(saved) !== before) throw new Error("entry_changed_during_update");
+      }
+      if (plan.leftover.includes(name)) { done.removed.push(name); delete receipt.files[name]; }
+      else {
+        fs.copyFileSync(path.join(source, name), dest, fs.constants.COPYFILE_EXCL);
+        receipt.files[name] = { workbench: fs.realpathSync(root), sha256: fileHash(dest) };
+        done.copied.push(name);
+      }
+    } catch (error) {
+      // Restore without replacing any concurrent entry; the exact backup stays recoverable.
+      if (saved) {
+        try {
+          const dest = path.join(menu, name);
+          if (isLink(saved)) fs.symlinkSync(fs.readlinkSync(saved), dest);
+          else fs.copyFileSync(saved, dest, fs.constants.COPYFILE_EXCL);
+        } catch { /* preserved in done.backups for explicit recovery */ }
+      }
+      done.errors.push(`${name}: ${error.code || error.message || "update_failed"}`);
+    }
+  }
+  // Record ownership only after verified copies. A damaged receipt fails closed on the next run.
+  const temporary = receiptFile() + "." + process.pid + ".tmp";
+  fs.writeFileSync(temporary, JSON.stringify(receipt, null, 2) + "\n", { flag: "wx" });
+  fs.renameSync(temporary, receiptFile());
+  return { ...agentMenu(root), applied: done, next: "Preserved conflicting custom or other-workbench entries. After approved changes, fully restart the app and verify the selected agent in a new thread." };
+}
+
+function describeAgentMenu(menu) {
+  if (!menu || menu.status !== "out_of_step") return null;
+  const bits = [];
+  if (menu.conflicts.length) bits.push(`preserved custom or other-workbench entries requiring individual review: ${menu.conflicts.join(", ")}`);
+  if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
+  if (menu.changed.length) bits.push(`older copies in the menu than in this workbench: ${menu.changed.join(", ")}`);
+  if (menu.leftover.length) bits.push(`left over in the menu from a retired or renamed seat: ${menu.leftover.join(", ")}`);
+  return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
+    "Run `node .claude/hooks/update-check.mjs --agent-menu` yourself and tell the student in plain words what it found " +
+    "and that Claude Code's @ menu only lists agents from their user folder; do not hand them the command. " +
+    "Only on their yes, run `node .claude/hooks/update-check.mjs --agent-menu-apply` yourself, say what it changed, " +
+    "then tell them to quit the app fully and reopen it. If they would rather not, drop it for this conversation.";
 }
 
 // ---------------------------------------------------------------------------
