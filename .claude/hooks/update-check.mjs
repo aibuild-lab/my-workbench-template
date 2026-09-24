@@ -170,8 +170,9 @@ function describe(report) {
 // Probe-tested on Mac and Windows, 09-24-2026. So: every aibl- agent here has an
 // identical entry there, and no retired aibl- entry is left behind. --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or
 // aibl-enroll runs it, after the student's yes. It touches aibl-*.md in that one
-// folder and nothing else, never writes through a link, and moves leftovers to a
-// dated backup folder instead of deleting them.
+// folder and nothing else, never writes through a link, and moves leftovers (only
+// entries this workbench's history once held) to a dated backup folder instead of
+// deleting them.
 
 function menuFolder() {
   return path.join(os.homedir(), ".claude", "agents");
@@ -208,10 +209,23 @@ function agentMenu(root) {
   const missing = here.filter((name) => !there.includes(name));
   // content only changes the description the menu shows; the workbench file runs
   const changed = here.filter((name) => there.includes(name) && !sameBytes(path.join(source, name), path.join(menu, name)));
-  const leftover = there.filter((name) => !here.includes(name));
+  // A leftover is an entry THIS workbench once shipped and has since retired or renamed.
+  // aibl- entries it never had (a second workbench, another program) are not ours to move
+  // (Gigawatt's review, 09-24): reported as not_ours, never touched.
+  const shipped = shippedBefore(root);
+  const gone = there.filter((name) => !here.includes(name));
+  const leftover = gone.filter((name) => shipped.has(name));
+  const notOurs = gone.filter((name) => !shipped.has(name));
   // contents count too: outside this workbench (another folder open) the user-folder copy is what runs
   const inStep = !missing.length && !changed.length && !leftover.length;
-  return { status: inStep ? "in_step" : "out_of_step", workbench: root, menu_folder: menu, missing, changed, leftover };
+  return { status: inStep ? "in_step" : "out_of_step", workbench: root, menu_folder: menu, missing, changed, leftover,
+    not_ours: notOurs };
+}
+
+function shippedBefore(root) {
+  // every aibl- agent file this workbench's history has ever held, deleted ones included
+  const log = git(root, ["log", "--format=", "--name-only", "--no-renames", "--", ".claude/agents"]);
+  return new Set(log.split(/\r?\n/).map((p) => path.posix.basename(p.trim())).filter((n) => AGENT_FILE.test(n)));
 }
 
 function applyAgentMenu(root) {
@@ -257,10 +271,10 @@ function describeAgentMenu(menu) {
   if (menu.changed.length) bits.push(`older copies in the menu than in this workbench: ${menu.changed.join(", ")}`);
   if (menu.leftover.length) bits.push(`left over in the menu from a retired or renamed seat: ${menu.leftover.join(", ")}`);
   return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
-    "Tell the student in one line that Claude Code's @ menu only lists agents from their user folder, and offer to fix it. " +
-    "Show them `node .claude/hooks/update-check.mjs --agent-menu`, and only on their yes run " +
-    "`node .claude/hooks/update-check.mjs --agent-menu-apply`, then tell them to quit the app fully and reopen it. " +
-    "If they would rather not, drop it for this conversation.";
+    "Run `node .claude/hooks/update-check.mjs --agent-menu` yourself and tell the student in plain words what it found " +
+    "and that Claude Code's @ menu only lists agents from their user folder; do not hand them the command. " +
+    "Only on their yes, run `node .claude/hooks/update-check.mjs --agent-menu-apply` yourself, say what it changed, " +
+    "then tell them to quit the app fully and reopen it. If they would rather not, drop it for this conversation.";
 }
 
 // ---------------------------------------------------------------------------

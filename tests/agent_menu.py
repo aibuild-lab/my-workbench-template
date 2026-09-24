@@ -23,13 +23,16 @@ class AgentMenu(unittest.TestCase):
         (agents / "aibl-chief-of-staff.md").write_text("chief v2\n")
         (agents / "aibl-the-professor.md").write_text("professor\n")
         (agents / "my-own-helper.md").write_text("not ours to copy\n")
+        (agents / "aibl-retired-seat.md").write_text("old seat\n")
         self.git("init", "-q", "-b", "main")
-        self.git("add", ".")
-        self.git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "wb")
+        self.commit_all("edition one")
+        (agents / "aibl-retired-seat.md").unlink()                            # retired in edition two
+        self.commit_all("edition two")
         self.menu = self.home / ".claude" / "agents"
         self.menu.mkdir(parents=True)
         (self.menu / "aibl-chief-of-staff.md").write_text("chief v1\n")      # changed
-        (self.menu / "aibl-retired-seat.md").write_text("old seat\n")        # leftover
+        (self.menu / "aibl-retired-seat.md").write_text("old seat\n")        # leftover: this workbench had it
+        (self.menu / "aibl-other-workbench.md").write_text("theirs\n")      # aibl- but never ours
         (self.menu / "someone-elses.md").write_text("leave me alone\n")     # not aibl-
         self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
                         CLAUDE_PROJECT_DIR=str(self.wb))
@@ -39,6 +42,10 @@ class AgentMenu(unittest.TestCase):
 
     def git(self, *args):
         subprocess.run(["git", "-C", str(self.wb), *args], check=True, capture_output=True)
+
+    def commit_all(self, message):
+        self.git("add", "-A")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 
     def run_hook(self, *args, stdin=""):
         p = subprocess.run(["node", str(HOOK), *args], input=stdin, text=True, capture_output=True,
@@ -52,6 +59,7 @@ class AgentMenu(unittest.TestCase):
         self.assertEqual(report["missing"], ["aibl-the-professor.md"])
         self.assertEqual(report["changed"], ["aibl-chief-of-staff.md"])
         self.assertEqual(report["leftover"], ["aibl-retired-seat.md"])
+        self.assertEqual(report["not_ours"], ["aibl-other-workbench.md"])
         self.assertTrue(Path(report["menu_folder"]).samefile(self.menu))
 
         # the hook only reports, and says so
@@ -62,6 +70,8 @@ class AgentMenu(unittest.TestCase):
         self.assertIn("aibl-the-professor.md", line)
         self.assertIn("aibl-retired-seat.md", line)
         self.assertIn("older copies in the menu than in this workbench: aibl-chief-of-staff.md", line)
+        self.assertNotIn("aibl-other-workbench.md", line)
+        self.assertIn("do not hand them the command", line)
         self.assertFalse((self.menu / "aibl-the-professor.md").exists())
 
         applied = json.loads(self.run_hook("--agent-menu-apply"))
@@ -73,6 +83,7 @@ class AgentMenu(unittest.TestCase):
         self.assertEqual((backup / "aibl-retired-seat.md").read_text(), "old seat\n")
         self.assertNotEqual(backup.parent.parent, self.menu.parent / "agents")
         self.assertEqual((self.menu / "someone-elses.md").read_text(), "leave me alone\n")
+        self.assertEqual((self.menu / "aibl-other-workbench.md").read_text(), "theirs\n")
         self.assertFalse((self.menu / "my-own-helper.md").exists())
         status = subprocess.run(["git", "-C", str(self.wb), "status", "--porcelain"], text=True, capture_output=True)
         self.assertEqual(status.stdout, "")
@@ -102,6 +113,14 @@ class AgentMenu(unittest.TestCase):
         report = json.loads(self.run_hook("--agent-menu"))
         self.assertEqual((report["status"], report["missing"], report["leftover"]), ("out_of_step", [], []))
         self.assertEqual(report["changed"], ["aibl-chief-of-staff.md"])
+
+    def test_never_ours_alone_is_in_step(self):
+        # a second workbench's aibl- entry is never a reason to speak up or move anything
+        (self.menu / "aibl-retired-seat.md").unlink()
+        (self.menu / "aibl-chief-of-staff.md").write_text("chief v2\n")
+        (self.menu / "aibl-the-professor.md").write_text("professor\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["status"], report["not_ours"]), ("in_step", ["aibl-other-workbench.md"]))
 
     def test_no_agents_means_no_line(self):
         for f in (self.wb / ".claude" / "agents").glob("aibl-*.md"):
