@@ -31,7 +31,7 @@ Open any of them and read it. A skill is a folder with one file in it, `SKILL.md
 
 ## When a program starts, and when it changes
 
-Every AI Build Lab program you join lands inside this same folder. You never set up a second one. On the day your access opens, run `aibl-enroll`: it shows you what the program adds, you say yes, and it merges the program's files in next to yours. When the course team publishes a change, `aibl-update` shows you what changed and merges it in the same way. Your `context`, `library` and `work` folders are yours; a program never contains them.
+Every AI Build Lab program you join lands inside this same folder. You never set up a second one. When your access opens, GitHub emails you an invitation to join `aibuild-lab` at the address on your GitHub account; accept it first (it is also waiting at https://github.com/settings/organizations). Then run `aibl-enroll`: it shows you what the program adds, you say yes, and it merges the program's files in next to yours. When the course team publishes a change, `aibl-update` shows you what changed and merges it in the same way. Your `context`, `library` and `work` folders are yours; a program never contains them.
 
 
 ## From Essentials to Workforce
