@@ -48,3 +48,12 @@ Already installed a Workforce package? Enrollment compares its files with the
 student branch and asks about differences before joining. Keep the old receipts;
 future course updates use `aibl-update`, not package repair. It reports changes,
 preserves settings and personal work, and asks before applying anything.
+
+## From Essentials to The Lab
+
+Same folder, same route. Once your membership opens your access, run
+`aibl-enroll` and choose The Lab. It comes from `aibuild-lab/the-lab`, branch
+`student`, and adds a `lab/` folder (blueprints now, agents as they arrive), the
+skills the Lab supplies, and one record under `.aibl/programs/`. Start a new
+session in this folder and run `aibl-lab`. New drops arrive through `aibl-update`.
+If your membership ends, what you already have stays; new drops stop arriving.
