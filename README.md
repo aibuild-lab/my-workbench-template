@@ -48,3 +48,11 @@ Already installed a Workforce package? Enrollment compares its files with the
 student branch and asks about differences before joining. Keep the old receipts;
 future course updates use `aibl-update`, not package repair. It reports changes,
 preserves settings and personal work, and asks before applying anything.
+
+## Agent-menu reliability candidate, 2026-09-24
+
+Enrollment and update can preview Claude agent-menu copies after course installation.
+The student approves the exact changes; custom agents and copies owned by another
+workbench are preserved, and replaced or retired managed entries have backups.
+Session-start checks report only. A new session and an observed agent reply are
+required after the student restarts the app. Codex discovery is checked separately.
