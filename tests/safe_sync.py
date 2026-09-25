@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
 WINDOWS = os.name == "nt"
+OFFICIAL = "https://github.com/aibuild-lab/agent-workforce.git"
 
 
 def tree(folder):
@@ -70,18 +71,36 @@ class Fixture(unittest.TestCase):
         (skills / "aibl-my-skill" / "SKILL.md").write_text("the student's own skill\n")
         self.git(self.wb, "init", "-q", "-b", "main")
         self.commit(self.wb, "workbench")
-        self.git(self.wb, "remote", "add", "agent-workforce", str(course))
+        self.course = course
+        self.git(self.wb, "remote", "add", "agent-workforce", OFFICIAL)
+        self.git(self.wb, "config", f"url.{course}.insteadOf", OFFICIAL)  # the fixture, for this test only
         self.git(self.wb, "fetch", "-q", "agent-workforce", "student")
+        self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
+                        CLAUDE_PROJECT_DIR=str(self.wb))
+        # On edition one this workbench put aibl-echo in the menu (and recorded that it did);
+        # then it took edition two, which retired aibl-echo.
+        agents_now = list(agents.iterdir())
+        hidden = self.base / "hidden"
+        hidden.mkdir()
+        for f in agents_now:
+            f.rename(hidden / f.name)
+        skills.rename(self.base / "hidden-skills")
+        (agents / "aibl-echo.md").write_text("echo\n")
+        self.run_hook("--agent-menu-apply")
+        (agents / "aibl-echo.md").unlink()
+        for f in hidden.iterdir():
+            f.rename(agents / f.name)
+        hidden.rmdir()
+        (self.base / "hidden-skills").rename(skills)
 
         # The student's home folder: their own agents in Claude Code and Codex, a course
         # leftover, an off-list -lead copy the course history once held, and their own skills.
         self.menu = self.home / ".claude" / "agents"
-        self.menu.mkdir(parents=True)
+        self.menu.mkdir(parents=True, exist_ok=True)
         (self.menu / "my-agent.md").write_text("my own agent\n")
         (self.menu / "aibl-custom-mine.md").write_text("my own aibl- agent\n")
         (self.menu / "aibl-chief-of-staff-lead.md").write_text("terminal chief\n")
         (self.menu / "aibl-kansa.md").write_text("on the list, but no connected program shipped it\n")
-        (self.menu / "aibl-echo.md").write_text("echo\n")
         self.codex = self.home / ".codex" / "agents"
         self.codex.mkdir(parents=True)
         (self.codex / "my-codex-agent.toml").write_text('name = "mine"\n')
@@ -95,8 +114,6 @@ class Fixture(unittest.TestCase):
         self.aibl.mkdir()
         (self.aibl / "other.json").write_text('{"leave": "me"}\n')
 
-        self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
-                        CLAUDE_PROJECT_DIR=str(self.wb))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -240,9 +257,117 @@ class BridgeSkillsAreRealCopies(Fixture):
     def test_no_course_agents_means_nothing_is_offered(self):
         (self.wb / ".claude" / "agents" / "aibl-chief-of-staff.md").unlink()
         report = json.loads(self.run_hook("--agent-menu"))
-        self.assertEqual(report["status"], "no_agents")
+        # only the workbench's own retired copy is left to clean up; no skills are offered
+        self.assertEqual((report["status"], report["leftover"]), ("out_of_step", ["aibl-echo.md"]))
+        self.assertEqual((report["skills"]["missing"], report["skills"]["changed"]), ([], []))
         self.run_hook("--agent-menu-apply")
         self.assertFalse((self.hskills / "aibl-bridge").exists())
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["status"], "no_agents")
+
+
+class LeftoverNeedsEvidence(Fixture):
+    """Codex review of #9, findings 2 to 5: a leftover is moved only when it is provably this
+    workbench's own retired copy."""
+
+    def other_workbench(self, agents):
+        other = self.base / "workbench-b"
+        (other / ".claude" / "agents").mkdir(parents=True)
+        (other / ".aibl").mkdir()
+        (other / ".aibl" / "template.json").write_text("{}\n")
+        for name, body in agents.items():
+            (other / ".claude" / "agents" / name).write_text(body)
+        self.git(other, "init", "-q", "-b", "main")
+        self.commit(other, "workbench b")
+        return other
+
+    def run_in(self, wb, *args):
+        env = dict(self.env, CLAUDE_PROJECT_DIR=str(wb))
+        p = subprocess.run(["node", str(HOOK), *args], text=True, capture_output=True, env=env, cwd=str(wb))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        return json.loads(p.stdout)
+
+    def test_the_fixture_leftover_is_ours(self):
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], ["aibl-echo.md"])
+
+    def test_not_a_leftover_while_the_current_edition_still_ships_it(self):
+        # this workbench is an edition behind: the course brought aibl-echo back in edition three
+        (self.course / ".claude" / "agents" / "aibl-echo.md").write_text("echo returns\n")
+        self.commit(self.course, "edition three")
+        self.git(self.wb, "fetch", "-q", "agent-workforce", "student")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual(report["leftover"], [])
+        self.assertIn("aibl-echo.md", report["not_ours"])
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
+
+    def test_never_moves_what_another_workbench_placed_more_recently(self):
+        other = self.other_workbench({"aibl-echo.md": "workbench b's echo\n"})
+        self.run_in(other, "--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "workbench b's echo\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual(report["leftover"], [])
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "workbench b's echo\n")
+
+    def test_never_moves_it_while_another_known_workbench_still_has_it(self):
+        # identical bytes, so workbench b never had to copy it; it is the recorded home workbench
+        other = self.other_workbench({"aibl-echo.md": "echo\n"})
+        (self.aibl / "workbench.json").write_text(json.dumps({"schema_version": "aibl.home-workbench/v1", "path": str(other)}))
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
+
+    def test_never_moves_a_copy_edited_after_it_was_placed(self):
+        (self.menu / "aibl-echo.md").write_text("echo, which the student edited\n")
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
+
+    def test_never_replaces_another_workbenchs_newer_copy(self):
+        other = self.other_workbench({"aibl-chief-of-staff.md": "workbench b's chief\n"})
+        self.run_in(other, "--agent-menu-apply")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["changed"], report["other_workbench"]), ([], ["aibl-chief-of-staff.md"]))
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "workbench b's chief\n")
+        # once workbench b is gone, this workbench may refresh it (the old copy is kept)
+        import shutil
+        shutil.rmtree(other)
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
+
+    def test_a_remote_only_named_like_the_program_proves_nothing(self):
+        self.git(self.wb, "remote", "set-url", "agent-workforce", str(self.course))
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual(report["leftover"], [])
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
+
+    def test_a_linked_agents_folder_is_refused(self):
+        other = self.other_workbench({"aibl-chief-of-staff.md": "b's chief\n", "aibl-echo.md": "echo\n"})
+        import shutil
+        shutil.rmtree(self.menu)
+        try:
+            os.symlink(other / ".claude" / "agents", self.menu, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this machine cannot create symlinks")
+        before = tree(other)
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual(report["status"], "linked_folder")
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertEqual(applied["refused"], "linked_folder")
+        self.assertEqual(tree(other), before)
+        payload = json.dumps({"source": "startup", "session_id": str(uuid.uuid4()), "cwd": str(self.wb)})
+        line = json.loads(self.run_hook(stdin=payload))["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("Do not offer the fix", line)
+
+    def test_a_linked_claude_folder_is_refused(self):
+        import shutil
+        real = self.base / "elsewhere-claude"
+        shutil.move(str(self.home / ".claude"), str(real))
+        try:
+            os.symlink(real, self.home / ".claude", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this machine cannot create symlinks")
+        before = tree(real)
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertEqual(applied.get("refused"), "linked_folder")
+        self.assertEqual(tree(real), before)
 
 
 class HomeWorkbenchPointer(Fixture):
@@ -286,6 +411,18 @@ class HomeWorkbenchPointer(Fixture):
         self.run_hook("--home-workbench-apply")
         self.assertEqual(victim.read_text(), "do not overwrite\n")
         self.assertFalse(self.pointer().is_symlink())
+
+    def test_a_linked_aibl_folder_is_refused(self):
+        import shutil
+        real = self.base / "elsewhere-aibl"
+        shutil.move(str(self.aibl), str(real))
+        try:
+            os.symlink(real, self.aibl, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this machine cannot create symlinks")
+        applied = json.loads(self.run_hook("--home-workbench-apply"))
+        self.assertEqual((applied["applied"], applied["error"]), (False, "linked_folder"))
+        self.assertFalse((real / "workbench.json").exists())
 
     def test_unreadable_pointer_is_reported(self):
         self.pointer().write_text("not json")

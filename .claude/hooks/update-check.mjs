@@ -65,6 +65,7 @@ const COURSE_AGENTS = new Set([
 // opened outside this workbench still has them (workforce-internal #98).
 const COURSE_SKILLS = ["aibl-bridge", "aibl-bridge-setup"];
 const HOME_POINTER_SCHEMA = "aibl.home-workbench/v1";
+const PLACED_SCHEMA = "aibl.agent-menu-placed/v1";
 const WINDOWS = process.platform === "win32";
 // Finder and Explorer litter that never makes a skill copy "changed"
 const TREE_NOISE = new Set([".DS_Store", "Thumbs.db", "__pycache__"]);
@@ -211,13 +212,22 @@ function describe(report) {
 // workbench has no bridge skill unless a real copy sits there.
 //
 // --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or aibl-enroll runs
-// it, after the student's yes. It touches only the names in COURSE_AGENTS and COURSE_SKILLS,
-// never writes through a link, and never deletes: a leftover or a replaced copy is moved to
-// a dated backup folder outside the folders the app reads. A leftover is a course agent
-// that this workbench no longer has AND that a connected program's published branch once
-// shipped. Everything else in those folders (the student's own agents and skills, aibl-
-// named or not, anything a second workbench or another course component put there) is
-// reported as not_ours and never touched. Codex's folders are never touched.
+// it, after the student's yes. The rules it keeps:
+//   - It touches only the names in COURSE_AGENTS and COURSE_SKILLS. Everything else in those
+//     folders (the student's own agents and skills, aibl- named or not, anything another
+//     course component put there) is reported as not_ours and never touched. Codex's
+//     folders are never touched.
+//   - It records what it places, and which workbench placed it, in ~/.claude/aibl-agent-menu-placed.json. It never
+//     replaces or moves an entry that another workbench recorded after it, while that
+//     workbench still exists and the entry is still exactly what it placed.
+//   - A leftover is moved only with evidence that it is this workbench's own retired copy:
+//     the name is on COURSE_AGENTS, a verified program's published branch once shipped it,
+//     that branch's current edition no longer has it, this workbench no longer has it, and
+//     that record says this workbench placed exactly these bytes.
+//   - It never writes through a link: not a linked file, and not a linked ~/.claude,
+//     ~/.claude/agents or ~/.claude/skills folder (it refuses and says why).
+//   - It never deletes: a leftover or a replaced copy is moved to a dated backup folder
+//     outside the folders the app reads.
 
 function menuFolder() {
   return path.join(os.homedir(), ".claude", "agents");
@@ -225,6 +235,10 @@ function menuFolder() {
 
 function skillsFolder() {
   return path.join(os.homedir(), ".claude", "skills");
+}
+
+function placedFile() {
+  return path.join(os.homedir(), ".claude", "aibl-agent-menu-placed.json");
 }
 
 function backupFolder(stamp) {
@@ -264,6 +278,117 @@ function exists(file) {
   try { fs.lstatSync(file); return true; } catch { return false; }
 }
 
+function sha256(buffer) {
+  return createHash("sha256").update(buffer).digest("hex");
+}
+
+function fileHash(file) {
+  try { return sha256(fs.readFileSync(file)); } catch { return null; }
+}
+
+function linkedFolders(base, rels) {
+  // Any of these folders that is (or sits under) a link or a Windows junction. Writing into
+  // one would change another folder, perhaps another workbench's own agents.
+  let realBase;
+  try { realBase = fs.realpathSync(base); } catch { return []; }
+  const linked = [];
+  for (const rel of rels) {
+    const p = path.join(base, rel);
+    if (!exists(p)) continue;
+    let real;
+    try { real = fs.realpathSync(p); } catch { linked.push(p); continue; }
+    const expected = path.join(realBase, rel);
+    if (WINDOWS ? real.toLowerCase() !== expected.toLowerCase() : real !== expected) linked.push(p);
+  }
+  return linked;
+}
+
+function linkedClaudeFolders() {
+  return linkedFolders(os.homedir(), [".claude", path.join(".claude", "agents"), path.join(".claude", "skills"),
+    path.join(".claude", "aibl-agent-menu-removed")]);
+}
+
+function readPlaced() {
+  try {
+    if (isLink(placedFile())) return { agents: {}, skills: {} };
+    const parsed = JSON.parse(fs.readFileSync(placedFile(), "utf8"));
+    return { agents: parsed.agents || {}, skills: parsed.skills || {} };
+  } catch {
+    return { agents: {}, skills: {} };
+  }
+}
+
+function writePlaced(placed) {
+  const file = placedFile();
+  const temp = `${file}.${process.pid}.tmp`;
+  if (isLink(file)) fs.unlinkSync(file);
+  fs.writeFileSync(temp, JSON.stringify({ schema_version: PLACED_SCHEMA, agents: placed.agents, skills: placed.skills }, null, 2) + "\n");
+  fs.renameSync(temp, file);
+}
+
+function workbenchId(root) {
+  try { return fs.realpathSync(root); } catch { return path.resolve(root); }
+}
+
+// Another workbench placed this entry after us, still holds that item, and the entry is still
+// exactly what it placed: not ours to replace or move.
+function heldByAnother(record, root, currentHash, stillThere) {
+  if (!record || !record.workbench || record.workbench === workbenchId(root)) return false;
+  if (!currentHash || record.sha256 !== currentHash) return false;
+  return stillThere(record.workbench);
+}
+
+function knownOtherWorkbenches(root, placed) {
+  // every other workbench this computer has a record of: the ones that placed menu entries,
+  // and the recorded home workbench
+  const me = workbenchId(root);
+  const found = new Set();
+  for (const group of [placed.agents, placed.skills]) {
+    for (const record of Object.values(group)) if (record && typeof record.workbench === "string") found.add(record.workbench);
+  }
+  try {
+    const recorded = JSON.parse(fs.readFileSync(pointerFile(), "utf8")).path;
+    if (typeof recorded === "string") found.add(workbenchId(recorded));
+  } catch { /* no pointer */ }
+  found.delete(me);
+  return [...found].filter((wb) => isRealDir(wb));
+}
+
+function verifiedProgramRefs(root) {
+  // <remote>/student refs whose remote is configured with the official URL. A remote merely
+  // NAMED agent-workforce that points at a personal repository proves nothing. The configured
+  // URL is read (not `git remote get-url`, which applies local insteadOf rewrites).
+  const refs = [];
+  for (const remote of PROGRAMS) {
+    const url = git(root, ["config", "--get", `remote.${remote}.url`]);
+    if (!url || !isOfficialRemote(url, remote)) continue;
+    const ref = `refs/remotes/${remote}/${PROGRAM_BRANCH}`;
+    if (git(root, ["rev-parse", "--verify", "--quiet", ref])) refs.push(ref);
+  }
+  return refs;
+}
+
+function courseHistory(root) {
+  // shipped: every aibl- agent a verified program's published branch has ever held.
+  // current: the ones its current edition holds. No verified ref, no names: nothing is ever a
+  // leftover. A second condition on top of COURSE_AGENTS, never a way around it.
+  const shipped = new Set();
+  const current = new Set();
+  for (const ref of verifiedProgramRefs(root)) {
+    const log = git(root, ["log", "--format=", "--name-only", "--no-renames", ref, "--", ".claude/agents"]);
+    for (const p of log.split(/\r?\n/)) {
+      const name = path.posix.basename(p.trim());
+      if (AGENT_FILE.test(name)) shipped.add(name);
+    }
+    const tip = git(root, ["ls-tree", "--name-only", `${ref}:.claude/agents`]);
+    for (const p of tip.split(/\r?\n/)) {
+      const name = p.trim();
+      if (AGENT_FILE.test(name)) current.add(name);
+    }
+  }
+  return { shipped, current };
+}
+
 function agentMenu(root) {
   const source = path.join(root, ".claude", "agents");
   const menu = menuFolder();
@@ -271,42 +396,40 @@ function agentMenu(root) {
   // Only the course's own agents are synced. An aibl- file the student made is theirs.
   const here = all.filter((name) => COURSE_AGENTS.has(name));
   const skipped = all.filter((name) => !COURSE_AGENTS.has(name));
-  if (!here.length) {
-    return { status: "no_agents", workbench: root, menu_folder: menu, missing: [], changed: [], leftover: [],
-      not_ours: [], skipped, skills: { skills_folder: skillsFolder(), missing: [], changed: [], errors: [] } };
-  }
+  const placed = readPlaced();
   const there = agentFiles(menu);
   const missing = here.filter((name) => !there.includes(name));
   // Contents count too: with another folder open, the user-folder copy is what runs. A link is
   // not a real copy (it breaks when the workbench moves, and Windows does not follow it).
-  const changed = here.filter((name) => there.includes(name) &&
+  const differs = here.filter((name) => there.includes(name) &&
     (isLink(path.join(menu, name)) || !sameBytes(path.join(source, name), path.join(menu, name))));
-  const shipped = shippedByCourse(root);
+  const otherWorkbench = differs.filter((name) => !isLink(path.join(menu, name)) &&
+    heldByAnother(placed.agents[name], root, fileHash(path.join(menu, name)),
+      (wb) => isRealFile(path.join(wb, ".claude", "agents", name))));
+  const changed = differs.filter((name) => !otherWorkbench.includes(name));
+  const { shipped, current } = courseHistory(root);
   const gone = there.filter((name) => !here.includes(name));
-  const leftover = gone.filter((name) => COURSE_AGENTS.has(name) && shipped.has(name));
+  const me = workbenchId(root);
+  const others = knownOtherWorkbenches(root, placed);
+  const leftover = gone.filter((name) => {
+    if (!COURSE_AGENTS.has(name) || !shipped.has(name) || current.has(name)) return false;
+    if (!isRealFile(path.join(menu, name))) return false;
+    const record = placed.agents[name];
+    if (!record || record.workbench !== me || record.sha256 !== fileHash(path.join(menu, name))) return false;
+    // and no other workbench this computer knows of still has it
+    return !others.some((wb) => isRealFile(path.join(wb, ".claude", "agents", name)));
+  });
   const notOurs = gone.filter((name) => !leftover.includes(name));
-  const skills = bridgeSkills(root);
+  // the bridge skills only come with the course's agents; a workbench with none gets none
+  const skills = here.length ? bridgeSkills(root, placed)
+    : { skills_folder: skillsFolder(), missing: [], changed: [], other_workbench: [], errors: [] };
+  const linked = linkedClaudeFolders();
+  const empty = !here.length && !leftover.length;
   const inStep = !missing.length && !changed.length && !leftover.length && !skills.missing.length && !skills.changed.length;
-  return { status: inStep ? "in_step" : "out_of_step", workbench: root, menu_folder: menu, missing, changed, leftover,
-    not_ours: notOurs, skipped, skills };
-}
-
-function shippedByCourse(root) {
-  // every aibl- agent file any connected program's published branch has ever held, retired
-  // ones included. Read from the already-fetched <remote>/student refs; no ref, no names,
-  // so nothing is ever treated as a leftover. A second condition on top of COURSE_AGENTS,
-  // never a way around it.
-  const names = new Set();
-  for (const remote of PROGRAMS) {
-    const ref = `refs/remotes/${remote}/${PROGRAM_BRANCH}`;
-    if (!git(root, ["rev-parse", "--verify", "--quiet", ref])) continue;
-    const log = git(root, ["log", "--format=", "--name-only", "--no-renames", ref, "--", ".claude/agents"]);
-    for (const p of log.split(/\r?\n/)) {
-      const name = path.posix.basename(p.trim());
-      if (AGENT_FILE.test(name)) names.add(name);
-    }
-  }
-  return names;
+  let status = empty ? "no_agents" : inStep ? "in_step" : "out_of_step";
+  if (linked.length && !inStep) status = "linked_folder";
+  return { status, workbench: root, menu_folder: menu, missing, changed, leftover, not_ours: notOurs, skipped,
+    other_workbench: otherWorkbench, linked_folders: linked, skills };
 }
 
 function realTree(dir) {
@@ -331,6 +454,18 @@ function executable(file) {
   try { return (fs.statSync(file).mode & 0o111) !== 0; } catch { return false; }
 }
 
+function treeHash(dir) {
+  const files = isRealDir(dir) ? realTree(dir) : null;
+  if (!files) return null;
+  const h = createHash("sha256");
+  for (const rel of files) {
+    h.update(rel.split(path.sep).join("/")).update("\0");
+    h.update(WINDOWS ? "" : (executable(path.join(dir, rel)) ? "x" : "-")).update("\0");
+    h.update(fs.readFileSync(path.join(dir, rel))).update("\0");
+  }
+  return h.digest("hex");
+}
+
 function sameTree(src, files, dest) {
   const other = isRealDir(dest) ? realTree(dest) : null;
   if (!other || other.join("\n") !== files.join("\n")) return false;
@@ -338,10 +473,11 @@ function sameTree(src, files, dest) {
     (WINDOWS || executable(path.join(src, rel)) === executable(path.join(dest, rel))));
 }
 
-function bridgeSkills(root) {
+function bridgeSkills(root, placed) {
   const folder = skillsFolder();
   const missing = [];
   const changed = [];
+  const otherWorkbench = [];
   const errors = [];
   for (const name of COURSE_SKILLS) {
     const src = path.join(root, ".claude", "skills", name);
@@ -350,9 +486,14 @@ function bridgeSkills(root) {
     if (!files) { errors.push(`${name}: the workbench copy holds a link, so it is not copied`); continue; }
     const dest = path.join(folder, name);
     if (!exists(dest)) missing.push(name);
-    else if (isLink(dest) || !sameTree(src, files, dest)) changed.push(name);
+    else if (isLink(dest)) changed.push(name);
+    else if (!sameTree(src, files, dest)) {
+      const stillThere = (wb) => isRealDir(path.join(wb, ".claude", "skills", name));
+      if (heldByAnother(placed.skills[name], root, treeHash(dest), stillThere)) otherWorkbench.push(name);
+      else changed.push(name);
+    }
   }
-  return { skills_folder: folder, missing, changed, errors };
+  return { skills_folder: folder, missing, changed, other_workbench: otherWorkbench, errors };
 }
 
 function copySkill(root, name, staging, dest, keep) {
@@ -375,9 +516,17 @@ function copySkill(root, name, staging, dest, keep) {
 
 function applyAgentMenu(root) {
   const plan = agentMenu(root);
-  if (plan.status === "no_agents") return plan;
+  if (plan.status === "no_agents" || plan.status === "in_step") return plan;
+  if (plan.linked_folders.length) {
+    return { ...plan, applied: null, refused: "linked_folder",
+      explain: "Your Claude agents or skills folder is a shortcut (a link) to another folder, perhaps another " +
+        "workbench's. Nothing was written, so that folder stays exactly as it is. To use the menu, the link has to " +
+        "become a real folder first; ask the course team before changing it." };
+  }
   const source = path.join(root, ".claude", "agents");
   const menu = plan.menu_folder;
+  const me = workbenchId(root);
+  const placed = readPlaced();
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
   const backup = backupFolder(stamp);
   const done = { copied: [], replaced: [], removed: [], skills_copied: [], removed_to: null, errors: [] };
@@ -396,6 +545,7 @@ function applyAgentMenu(root) {
       if (isLink(dest)) fs.unlinkSync(dest);
       else if (exists(dest)) { keep(dest, path.join("replaced", name)); done.replaced.push(name); }
       fs.copyFileSync(path.join(source, name), dest, fs.constants.COPYFILE_EXCL);
+      placed.agents[name] = { workbench: me, sha256: fileHash(dest), placed_at: new Date().toISOString() };
       done.copied.push(name);
     } catch (error) {
       done.errors.push(`${name}: ${error.code || "copy_failed"}`);
@@ -405,6 +555,7 @@ function applyAgentMenu(root) {
     if (!COURSE_AGENTS.has(name)) continue;
     try {
       keep(path.join(menu, name), name);
+      delete placed.agents[name];
       done.removed.push(name);
     } catch (error) {
       done.errors.push(`${name}: ${error.code || "move_failed"}`);
@@ -414,8 +565,10 @@ function applyAgentMenu(root) {
   for (const name of [...plan.skills.missing, ...plan.skills.changed]) {
     if (!COURSE_SKILLS.includes(name)) continue;
     const staging = path.join(stagingRoot, `${stamp}-${name}`);
+    const dest = path.join(skillsFolder(), name);
     try {
-      copySkill(root, name, staging, path.join(skillsFolder(), name), keep);
+      copySkill(root, name, staging, dest, keep);
+      placed.skills[name] = { workbench: me, sha256: treeHash(dest), placed_at: new Date().toISOString() };
       done.skills_copied.push(name);
     } catch (error) {
       done.errors.push(`skill ${name}: ${error.code || "copy_failed"}`);
@@ -423,17 +576,24 @@ function applyAgentMenu(root) {
     }
   }
   try { fs.rmdirSync(stagingRoot); } catch { /* not empty or never made */ }
+  try { writePlaced(placed); } catch (error) { done.errors.push(`record: ${error.code || "write_failed"}`); }
   return { ...agentMenu(root), applied: done, next: "Quit the app fully and open it again: the menu reads this folder only at launch. Then start a new thread before typing @." };
 }
 
 function describeAgentMenu(menu) {
-  if (!menu || menu.status !== "out_of_step") return null;
+  if (!menu || (menu.status !== "out_of_step" && menu.status !== "linked_folder")) return null;
   const bits = [];
   if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
   if (menu.changed.length) bits.push(`older copies in the menu than in this workbench: ${menu.changed.join(", ")}`);
-  if (menu.leftover.length) bits.push(`left over in the menu from a retired or renamed seat: ${menu.leftover.join(", ")}`);
+  if (menu.leftover.length) bits.push(`left over in the menu from a retired seat: ${menu.leftover.join(", ")}`);
   if (menu.skills.missing.length) bits.push(`bridge skills not yet available outside this workbench: ${menu.skills.missing.join(", ")}`);
   if (menu.skills.changed.length) bits.push(`older bridge skill copies than this workbench's: ${menu.skills.changed.join(", ")}`);
+  if (menu.status === "linked_folder") {
+    return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
+      `But ${menu.linked_folders.join(" and ")} is a link to another folder, so the fix would write into that folder. ` +
+      "Do not offer the fix. Tell the student in plain words that their Claude agents folder is a shortcut to another " +
+      "folder, that nothing was changed, and that the course team can help make it a real folder.";
+  }
   return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
     "Run `node .claude/hooks/update-check.mjs --agent-menu` yourself and tell the student in plain words what it found, " +
     "that Claude Code's @ menu only lists agents from their user folder, and that the bridge needs its skills there to work " +
@@ -492,6 +652,8 @@ function applyHomeWorkbench(root) {
   const before = homeWorkbench(root);
   const pointer = before.pointer;
   const temp = `${pointer}.${process.pid}.tmp`;
+  const linked = linkedFolders(os.homedir(), [".aibl"]);
+  if (linked.length) return { ...before, applied: false, error: "linked_folder", linked_folders: linked };
   try {
     if (isLink(pointer)) fs.unlinkSync(pointer); // never write through a link
     fs.mkdirSync(path.dirname(pointer), { recursive: true });

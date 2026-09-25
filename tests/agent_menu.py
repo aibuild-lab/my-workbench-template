@@ -41,22 +41,29 @@ class AgentMenu(unittest.TestCase):
         (agents / "aibl-the-professor.md").write_text("professor\n")
         (agents / "my-own-helper.md").write_text("not ours to copy\n")
         (agents / "aibl-my-own-seat.md").write_text("the student's own\n")
+        (agents / RETIRED).write_text("old seat\n")                          # this workbench is on edition one
         self.git("init", "-q", "-b", "main")
         self.commit_all("workbench")
         (agents / "aibl-my-own-seat.md").unlink()                             # the student retired their own
         self.commit_all("retire my own seat")
-        self.git("remote", "add", "agent-workforce", str(course))
+        # the official URL, rewritten to the local fixture for this test only
+        self.git("remote", "add", "agent-workforce", "https://github.com/aibuild-lab/agent-workforce.git")
+        self.git("config", f"url.{course}.insteadOf", "https://github.com/aibuild-lab/agent-workforce.git")
         self.git("fetch", "-q", "agent-workforce", "student")
         self.menu = self.home / ".claude" / "agents"
-        self.menu.mkdir(parents=True)
+        self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
+                        CLAUDE_PROJECT_DIR=str(self.wb))
+        # on edition one this workbench put its agents in the menu (and recorded that it did)
+        self.run_hook("--agent-menu-apply")
+        (agents / RETIRED).unlink()                                           # then took edition two
+        self.commit_all("edition two")
+        (self.menu / "aibl-the-professor.md").unlink()                        # missing
         (self.menu / "aibl-chief-of-staff.md").write_text("chief v1\n")      # changed
-        (self.menu / RETIRED).write_text("old seat\n")                       # leftover: the course shipped it
+        # RETIRED stays as this workbench placed it: a leftover
         (self.menu / "aibl-other-workbench.md").write_text("theirs\n")      # aibl- but never shipped
         (self.menu / "aibl-my-own-seat.md").write_text("the student's own\n")   # the student's, not ours
         (self.menu / "aibl-chief-of-staff-lead.md").write_text("terminal Chief\n")  # rendered locally (#96)
         (self.menu / "someone-elses.md").write_text("leave me alone\n")     # not aibl-
-        self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
-                        CLAUDE_PROJECT_DIR=str(self.wb))
 
     def tearDown(self):
         self.temp.cleanup()
@@ -159,9 +166,16 @@ class AgentMenu(unittest.TestCase):
         self.assertEqual(report["leftover"], [])
         self.assertIn(RETIRED, report["not_ours"])
 
-    def test_no_agents_means_no_line(self):
+    def test_no_agents_left_still_cleans_up_leftovers(self):
+        # the workbench has no aibl- agents any more: nothing to copy, but its own retired
+        # copy is still found and moved (Codex review of #9, finding 5)
         for f in (self.wb / ".claude" / "agents").glob("aibl-*.md"):
             f.unlink()
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["status"], report["missing"], report["leftover"]), ("out_of_step", [], [RETIRED]))
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertEqual(applied["applied"]["removed"], [RETIRED])
+        self.assertEqual(applied["applied"]["copied"], [])
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["status"], "no_agents")
 
 
