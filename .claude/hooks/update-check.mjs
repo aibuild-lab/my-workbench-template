@@ -27,7 +27,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import tty from "node:tty";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { spawnSync } from "node:child_process";
 
 const HOOK_EVENT = "SessionStart";
@@ -65,8 +65,10 @@ const COURSE_AGENTS = new Set([
 // opened outside this workbench still has them (workforce-internal #98).
 const COURSE_SKILLS = ["aibl-bridge", "aibl-bridge-setup"];
 const HOME_POINTER_SCHEMA = "aibl.home-workbench/v1";
-const PLACED_SCHEMA = "aibl.agent-menu-placed/v1";
+const PLACED_SCHEMA = "aibl.agent-menu-placed/v2";
 const WINDOWS = process.platform === "win32";
+// Mac and Windows folders ignore letter case, so paths are compared the same way there.
+const CASE_BLIND = WINDOWS || process.platform === "darwin";
 // Finder and Explorer litter that never makes a skill copy "changed"
 const TREE_NOISE = new Set([".DS_Store", "Thumbs.db", "__pycache__"]);
 
@@ -84,7 +86,7 @@ function main() {
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
     } else if (process.argv.includes("--agent-menu-apply")) {
       const root = resolveRoot({});
-      const report = root ? applyAgentMenu(root) : { status: "not_a_workbench" };
+      const report = root ? applyAgentMenu(root, replaceEditedArgs()) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
     } else if (process.argv.includes("--agent-menu")) {
       const root = resolveRoot({});
@@ -101,6 +103,16 @@ function main() {
     // Fail quiet. A broken update check must never cost a student a session.
   }
   process.exit(0);
+}
+
+function replaceEditedArgs() {
+  // --replace-edited NAME[,NAME]: the student said yes to replacing these edited copies
+  const names = [];
+  process.argv.forEach((arg, i) => {
+    if (arg === "--replace-edited" && process.argv[i + 1]) names.push(...process.argv[i + 1].split(","));
+    else if (arg.startsWith("--replace-edited=")) names.push(...arg.slice("--replace-edited=".length).split(","));
+  });
+  return names.map((n) => n.trim()).filter(Boolean);
 }
 
 function hook() {
@@ -212,38 +224,62 @@ function describe(report) {
 // workbench has no bridge skill unless a real copy sits there.
 //
 // --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or aibl-enroll runs
-// it, after the student's yes. The rules it keeps:
-//   - It touches only the names in COURSE_AGENTS and COURSE_SKILLS. Everything else in those
-//     folders (the student's own agents and skills, aibl- named or not, anything another
-//     course component put there) is reported as not_ours and never touched. Codex's
-//     folders are never touched.
-//   - It records what it places, and which workbench placed it, in ~/.claude/aibl-agent-menu-placed.json. It never
-//     replaces or moves an entry that another workbench recorded after it, while that
-//     workbench still exists and the entry is still exactly what it placed.
-//   - A leftover is moved only with evidence that it is this workbench's own retired copy:
-//     the name is on COURSE_AGENTS, a verified program's published branch once shipped it,
-//     that branch's current edition no longer has it, this workbench no longer has it, and
-//     that record says this workbench placed exactly these bytes.
-//   - It never writes through a link: not a linked file, and not a linked ~/.claude,
-//     ~/.claude/agents or ~/.claude/skills folder (it refuses and says why).
-//   - It never deletes: a leftover or a replaced copy is moved to a dated backup folder
-//     outside the folders the app reads.
+// it, after the student's yes. The rules it keeps (Tyler, 09-24: never a student's own
+// agents, never other course components):
+//   - It touches only the exact names in COURSE_AGENTS and COURSE_SKILLS. Anything else in
+//     those folders (the student's own agents and skills, aibl- named or not, in any letter
+//     case) is not_ours and never touched. Codex's folders are never touched.
+//   - A missing name is copied only when nothing sits at that name in any letter case (Mac
+//     and Windows folders ignore case): a clash is reported as case_conflict and skipped.
+//   - An existing copy that differs from this workbench's is replaced only when its bytes
+//     are provably course-made: a version the verified course branch has published, or
+//     bytes some workbench is recorded as having placed. A copy that matches another
+//     known workbench's current file is that workbench's (other_workbench, kept). Anything
+//     else has the student's own edits (edited, kept); the agent asks the student, and
+//     only --replace-edited NAME replaces it.
+//   - A leftover (a retired course agent) is moved only when the course's verified branch
+//     once shipped it and its current edition does not, this workbench no longer has it,
+//     this workbench is recorded as having placed exactly these bytes, and no other known
+//     workbench (recorded holders, the home pointer) still has that name.
+//   - It records every copy it places, and every copy it finds already matching ("claim
+//     without writing"), in ~/.claude/aibl-agent-menu-placed.json.
+//   - It never writes through a link and refuses a linked ~/.claude, agents, skills,
+//     backup or staging folder. It holds a lock while it plans and applies, and re-checks
+//     each file just before it moves it.
+//   - It never deletes: a replaced copy, a link it converts, and a leftover all move to a
+//     uniquely named, dated backup folder outside the folders the app reads.
+
+function claudeFolder() {
+  return path.join(os.homedir(), ".claude");
+}
 
 function menuFolder() {
-  return path.join(os.homedir(), ".claude", "agents");
+  return path.join(claudeFolder(), "agents");
 }
 
 function skillsFolder() {
-  return path.join(os.homedir(), ".claude", "skills");
+  return path.join(claudeFolder(), "skills");
 }
 
 function placedFile() {
-  return path.join(os.homedir(), ".claude", "aibl-agent-menu-placed.json");
+  return path.join(claudeFolder(), "aibl-agent-menu-placed.json");
 }
 
-function backupFolder(stamp) {
+function lockFile() {
+  return path.join(claudeFolder(), "aibl-agent-menu.lock");
+}
+
+function backupRoot() {
   // outside the agents and skills folders, so the app cannot pick a backup up
-  return path.join(os.homedir(), ".claude", "aibl-agent-menu-removed", stamp);
+  return path.join(claudeFolder(), "aibl-agent-menu-removed");
+}
+
+function stagingRoot() {
+  return path.join(claudeFolder(), "aibl-agent-menu-staging");
+}
+
+function uniqueStamp() {
+  return `${new Date().toISOString().replace(/[:.]/g, "-")}-${randomBytes(4).toString("hex")}`;
 }
 
 function agentFiles(folder) {
@@ -252,6 +288,14 @@ function agentFiles(folder) {
   } catch {
     return [];
   }
+}
+
+function entriesByLowerName(folder) {
+  const map = new Map();
+  try {
+    for (const name of fs.readdirSync(folder)) map.set(name.toLowerCase(), name);
+  } catch { /* no folder yet */ }
+  return map;
 }
 
 function sameBytes(a, b) {
@@ -283,7 +327,43 @@ function sha256(buffer) {
 }
 
 function fileHash(file) {
+  // follows a link: what the app would read
   try { return sha256(fs.readFileSync(file)); } catch { return null; }
+}
+
+function gitBlobIds(file) {
+  // the id git would give these bytes, in both object formats
+  try {
+    const bytes = fs.readFileSync(file);
+    const header = Buffer.from(`blob ${bytes.length}\0`);
+    return [createHash("sha1").update(header).update(bytes).digest("hex"),
+      createHash("sha256").update(header).update(bytes).digest("hex")];
+  } catch {
+    return [];
+  }
+}
+
+// What an entry is right now, so apply can tell whether it changed after the plan.
+function fingerprint(p) {
+  try {
+    const st = fs.lstatSync(p);
+    if (st.isSymbolicLink()) return `link:${fs.readlinkSync(p)}`;
+    if (st.isFile()) return `file:${fileHash(p)}`;
+    if (st.isDirectory()) return `dir:${treeHash(p)}`;
+    return "other";
+  } catch {
+    return "absent";
+  }
+}
+
+function workbenchId(root) {
+  try { return fs.realpathSync(root); } catch { return path.resolve(root); }
+}
+
+function sameWorkbench(a, b) {
+  const x = workbenchId(a);
+  const y = workbenchId(b);
+  return CASE_BLIND ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 
 function linkedFolders(base, rels) {
@@ -298,69 +378,87 @@ function linkedFolders(base, rels) {
     let real;
     try { real = fs.realpathSync(p); } catch { linked.push(p); continue; }
     const expected = path.join(realBase, rel);
-    if (WINDOWS ? real.toLowerCase() !== expected.toLowerCase() : real !== expected) linked.push(p);
+    if (CASE_BLIND ? real.toLowerCase() !== expected.toLowerCase() : real !== expected) linked.push(p);
   }
   return linked;
 }
 
 function linkedClaudeFolders() {
   return linkedFolders(os.homedir(), [".claude", path.join(".claude", "agents"), path.join(".claude", "skills"),
-    path.join(".claude", "aibl-agent-menu-removed")]);
+    path.join(".claude", "aibl-agent-menu-removed"), path.join(".claude", "aibl-agent-menu-staging")]);
 }
 
+// The record: for each name, every hash any workbench has placed or claimed (proof those
+// bytes are course-made copies), and which workbench holds which hash now. An unreadable
+// record is treated as empty, which only ever makes the hook keep more.
 function readPlaced() {
+  const empty = { agents: {}, skills: {} };
   try {
-    if (isLink(placedFile())) return { agents: {}, skills: {} };
+    if (!isRealFile(placedFile())) return empty;
     const parsed = JSON.parse(fs.readFileSync(placedFile(), "utf8"));
+    if (!parsed || parsed.schema_version !== PLACED_SCHEMA) return empty;
     return { agents: parsed.agents || {}, skills: parsed.skills || {} };
   } catch {
-    return { agents: {}, skills: {} };
+    return empty;
   }
 }
 
 function writePlaced(placed) {
   const file = placedFile();
-  const temp = `${file}.${process.pid}.tmp`;
+  const temp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const fd = fs.openSync(temp, "wx"); // never an existing file, never a link
+  try {
+    fs.writeSync(fd, JSON.stringify({ schema_version: PLACED_SCHEMA, agents: placed.agents, skills: placed.skills }, null, 2) + "\n");
+  } finally {
+    fs.closeSync(fd);
+  }
   if (isLink(file)) fs.unlinkSync(file);
-  fs.writeFileSync(temp, JSON.stringify({ schema_version: PLACED_SCHEMA, agents: placed.agents, skills: placed.skills }, null, 2) + "\n");
   fs.renameSync(temp, file);
 }
 
-function workbenchId(root) {
-  try { return fs.realpathSync(root); } catch { return path.resolve(root); }
+function hold(placed, group, name, root, hash) {
+  if (!hash) return;
+  const entry = placed[group][name] || (placed[group][name] = { hashes: [], holders: {} });
+  if (!entry.hashes.includes(hash)) entry.hashes.push(hash);
+  for (const wb of Object.keys(entry.holders)) if (sameWorkbench(wb, root)) delete entry.holders[wb];
+  entry.holders[workbenchId(root)] = hash;
 }
 
-// Another workbench placed this entry after us, still holds that item, and the entry is still
-// exactly what it placed: not ours to replace or move.
-function heldByAnother(record, root, currentHash, stillThere) {
-  if (!record || !record.workbench || record.workbench === workbenchId(root)) return false;
-  if (!currentHash || record.sha256 !== currentHash) return false;
-  return stillThere(record.workbench);
+function release(placed, group, name, root) {
+  const entry = placed[group][name];
+  if (!entry) return;
+  for (const wb of Object.keys(entry.holders)) if (sameWorkbench(wb, root)) delete entry.holders[wb];
+}
+
+function heldHere(placed, group, name, root, hash) {
+  const entry = placed[group][name];
+  if (!entry || !hash) return false;
+  return Object.entries(entry.holders).some(([wb, h]) => sameWorkbench(wb, root) && h === hash);
 }
 
 function knownOtherWorkbenches(root, placed) {
-  // every other workbench this computer has a record of: the ones that placed menu entries,
-  // and the recorded home workbench
-  const me = workbenchId(root);
-  const found = new Set();
+  // every other workbench this computer has a record of: the holders in the record, and
+  // the recorded home workbench
+  const found = [];
+  const add = (wb) => {
+    if (typeof wb !== "string" || sameWorkbench(wb, root)) return;
+    if (!isRealDir(wb) || found.some((f) => sameWorkbench(f, wb))) return;
+    found.push(wb);
+  };
   for (const group of [placed.agents, placed.skills]) {
-    for (const record of Object.values(group)) if (record && typeof record.workbench === "string") found.add(record.workbench);
+    for (const entry of Object.values(group)) for (const wb of Object.keys((entry && entry.holders) || {})) add(wb);
   }
-  try {
-    const recorded = JSON.parse(fs.readFileSync(pointerFile(), "utf8")).path;
-    if (typeof recorded === "string") found.add(workbenchId(recorded));
-  } catch { /* no pointer */ }
-  found.delete(me);
-  return [...found].filter((wb) => isRealDir(wb));
+  try { add(JSON.parse(fs.readFileSync(pointerFile(), "utf8")).path); } catch { /* no pointer */ }
+  return found;
 }
 
 function verifiedProgramRefs(root) {
-  // <remote>/student refs whose remote is configured with the official URL. A remote merely
-  // NAMED agent-workforce that points at a personal repository proves nothing. The configured
-  // URL is read (not `git remote get-url`, which applies local insteadOf rewrites).
+  // <remote>/student refs whose remote's EFFECTIVE fetch URL (`git remote get-url`, which
+  // applies any insteadOf rewrite) is the official repository. A remote merely named
+  // agent-workforce, or one rewritten to point somewhere else, proves nothing.
   const refs = [];
   for (const remote of PROGRAMS) {
-    const url = git(root, ["config", "--get", `remote.${remote}.url`]);
+    const url = git(root, ["remote", "get-url", remote]);
     if (!url || !isOfficialRemote(url, remote)) continue;
     const ref = `refs/remotes/${remote}/${PROGRAM_BRANCH}`;
     if (git(root, ["rev-parse", "--verify", "--quiet", ref])) refs.push(ref);
@@ -369,16 +467,23 @@ function verifiedProgramRefs(root) {
 }
 
 function courseHistory(root) {
-  // shipped: every aibl- agent a verified program's published branch has ever held.
-  // current: the ones its current edition holds. No verified ref, no names: nothing is ever a
-  // leftover. A second condition on top of COURSE_AGENTS, never a way around it.
+  // shipped: every aibl- agent a verified program branch has ever held. current: the ones
+  // its current edition holds. blobs: every version of each it ever published. No verified
+  // ref, no names: nothing is a leftover and nothing is proven course-made by the course.
   const shipped = new Set();
   const current = new Set();
+  const blobs = new Map();
   for (const ref of verifiedProgramRefs(root)) {
-    const log = git(root, ["log", "--format=", "--name-only", "--no-renames", ref, "--", ".claude/agents"]);
-    for (const p of log.split(/\r?\n/)) {
-      const name = path.posix.basename(p.trim());
-      if (AGENT_FILE.test(name)) shipped.add(name);
+    const raw = git(root, ["log", "--raw", "--no-abbrev", "--no-renames", "--format=", ref, "--", ".claude/agents"]);
+    for (const line of raw.split(/\r?\n/)) {
+      const m = line.match(/^:\d+ \d+ ([0-9a-f]+) ([0-9a-f]+) \w+\t(.+)$/);
+      if (!m) continue;
+      const name = path.posix.basename(m[3].trim());
+      if (!AGENT_FILE.test(name)) continue;
+      shipped.add(name);
+      const set = blobs.get(name) || new Set();
+      for (const id of [m[1], m[2]]) if (!/^0+$/.test(id)) set.add(id);
+      blobs.set(name, set);
     }
     const tip = git(root, ["ls-tree", "--name-only", `${ref}:.claude/agents`]);
     for (const p of tip.split(/\r?\n/)) {
@@ -386,7 +491,7 @@ function courseHistory(root) {
       if (AGENT_FILE.test(name)) current.add(name);
     }
   }
-  return { shipped, current };
+  return { shipped, current, blobs };
 }
 
 function agentMenu(root) {
@@ -397,39 +502,60 @@ function agentMenu(root) {
   const here = all.filter((name) => COURSE_AGENTS.has(name));
   const skipped = all.filter((name) => !COURSE_AGENTS.has(name));
   const placed = readPlaced();
-  const there = agentFiles(menu);
-  const missing = here.filter((name) => !there.includes(name));
-  // Contents count too: with another folder open, the user-folder copy is what runs. A link is
-  // not a real copy (it breaks when the workbench moves, and Windows does not follow it).
-  const differs = here.filter((name) => there.includes(name) &&
-    (isLink(path.join(menu, name)) || !sameBytes(path.join(source, name), path.join(menu, name))));
-  const otherWorkbench = differs.filter((name) => !isLink(path.join(menu, name)) &&
-    heldByAnother(placed.agents[name], root, fileHash(path.join(menu, name)),
-      (wb) => isRealFile(path.join(wb, ".claude", "agents", name))));
-  const changed = differs.filter((name) => !otherWorkbench.includes(name));
-  const { shipped, current } = courseHistory(root);
-  const gone = there.filter((name) => !here.includes(name));
-  const me = workbenchId(root);
   const others = knownOtherWorkbenches(root, placed);
+  const history = courseHistory(root);
+  const byLower = entriesByLowerName(menu);
+  const there = agentFiles(menu);
+  const missing = [];
+  const caseConflict = [];
+  const changed = [];
+  const edited = [];
+  const otherWorkbench = [];
+  const inStepNames = [];
+  const seen = {};
+  for (const name of here) {
+    const actual = byLower.get(name.toLowerCase());
+    const dest = path.join(menu, name);
+    if (actual === undefined) { missing.push(name); continue; }
+    if (actual !== name) { caseConflict.push(`${actual} (in the way of ${name})`); continue; }
+    seen[name] = fingerprint(dest);
+    const ours = path.join(source, name);
+    if (!isLink(dest) && sameBytes(ours, dest)) { inStepNames.push(name); continue; }
+    const hash = fileHash(dest);
+    // another known workbench's current copy: theirs
+    if (hash && others.some((wb) => sameBytes(path.join(wb, ".claude", "agents", name), dest))) {
+      otherWorkbench.push(name);
+      continue;
+    }
+    const recorded = Boolean(hash && placed.agents[name] && placed.agents[name].hashes.includes(hash));
+    const published = gitBlobIds(dest).some((id) => (history.blobs.get(name) || new Set()).has(id));
+    const linkToOurs = isLink(dest) && sameBytes(ours, dest);
+    if (recorded || published || linkToOurs) changed.push(name);
+    else edited.push(name);
+  }
+  const gone = there.filter((name) => !here.includes(name));
   const leftover = gone.filter((name) => {
-    if (!COURSE_AGENTS.has(name) || !shipped.has(name) || current.has(name)) return false;
-    if (!isRealFile(path.join(menu, name))) return false;
-    const record = placed.agents[name];
-    if (!record || record.workbench !== me || record.sha256 !== fileHash(path.join(menu, name))) return false;
-    // and no other workbench this computer knows of still has it
-    return !others.some((wb) => isRealFile(path.join(wb, ".claude", "agents", name)));
+    const dest = path.join(menu, name);
+    if (!COURSE_AGENTS.has(name) || !history.shipped.has(name) || history.current.has(name)) return false;
+    if (!isRealFile(dest)) return false;
+    if (!heldHere(placed, "agents", name, root, fileHash(dest))) return false;
+    // no other workbench this computer knows of still has it, in any form
+    return !others.some((wb) => exists(path.join(wb, ".claude", "agents", name)));
   });
+  for (const name of leftover) seen[name] = fingerprint(path.join(menu, name));
   const notOurs = gone.filter((name) => !leftover.includes(name));
   // the bridge skills only come with the course's agents; a workbench with none gets none
-  const skills = here.length ? bridgeSkills(root, placed)
-    : { skills_folder: skillsFolder(), missing: [], changed: [], other_workbench: [], errors: [] };
+  const skills = here.length ? bridgeSkills(root, placed, others)
+    : { skills_folder: skillsFolder(), missing: [], changed: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
   const linked = linkedClaudeFolders();
   const empty = !here.length && !leftover.length;
-  const inStep = !missing.length && !changed.length && !leftover.length && !skills.missing.length && !skills.changed.length;
-  let status = empty ? "no_agents" : inStep ? "in_step" : "out_of_step";
-  if (linked.length && !inStep) status = "linked_folder";
-  return { status, workbench: root, menu_folder: menu, missing, changed, leftover, not_ours: notOurs, skipped,
-    other_workbench: otherWorkbench, linked_folders: linked, skills };
+  const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length;
+  const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length;
+  let status = empty ? "no_agents" : pending ? "out_of_step" : toAsk ? "needs_a_decision" : "in_step";
+  if (linked.length && (pending || toAsk)) status = "linked_folder";
+  return { status, workbench: root, menu_folder: menu, missing, changed, edited, leftover, not_ours: notOurs, skipped,
+    other_workbench: otherWorkbench, case_conflict: caseConflict, linked_folders: linked, skills,
+    in_step: inStepNames, seen };
 }
 
 function realTree(dir) {
@@ -454,98 +580,160 @@ function executable(file) {
   try { return (fs.statSync(file).mode & 0o111) !== 0; } catch { return false; }
 }
 
-function treeHash(dir) {
+function treeHash(dir, withModes = true) {
   const files = isRealDir(dir) ? realTree(dir) : null;
   if (!files) return null;
   const h = createHash("sha256");
   for (const rel of files) {
     h.update(rel.split(path.sep).join("/")).update("\0");
-    h.update(WINDOWS ? "" : (executable(path.join(dir, rel)) ? "x" : "-")).update("\0");
+    h.update(WINDOWS || !withModes ? "" : (executable(path.join(dir, rel)) ? "x" : "-")).update("\0");
     h.update(fs.readFileSync(path.join(dir, rel))).update("\0");
   }
   return h.digest("hex");
 }
 
-function sameTree(src, files, dest) {
-  const other = isRealDir(dest) ? realTree(dest) : null;
-  if (!other || other.join("\n") !== files.join("\n")) return false;
-  return files.every((rel) => sameBytes(path.join(src, rel), path.join(dest, rel)) &&
-    (WINDOWS || executable(path.join(src, rel)) === executable(path.join(dest, rel))));
-}
-
-function bridgeSkills(root, placed) {
+function bridgeSkills(root, placed, others) {
   const folder = skillsFolder();
-  const missing = [];
-  const changed = [];
-  const otherWorkbench = [];
-  const errors = [];
+  const byLower = entriesByLowerName(folder);
+  const out = { skills_folder: folder, missing: [], changed: [], edited: [], other_workbench: [], case_conflict: [],
+    in_step: [], seen: {}, errors: [] };
   for (const name of COURSE_SKILLS) {
     const src = path.join(root, ".claude", "skills", name);
     if (!isRealDir(src)) continue; // this workbench's edition does not have it
-    const files = realTree(src);
-    if (!files) { errors.push(`${name}: the workbench copy holds a link, so it is not copied`); continue; }
+    const ours = treeHash(src);
+    if (!ours) { out.errors.push(`${name}: the workbench copy holds a link, so it is not copied`); continue; }
+    const actual = byLower.get(name.toLowerCase());
     const dest = path.join(folder, name);
-    if (!exists(dest)) missing.push(name);
-    else if (isLink(dest)) changed.push(name);
-    else if (!sameTree(src, files, dest)) {
-      const stillThere = (wb) => isRealDir(path.join(wb, ".claude", "skills", name));
-      if (heldByAnother(placed.skills[name], root, treeHash(dest), stillThere)) otherWorkbench.push(name);
-      else changed.push(name);
+    if (actual === undefined) { out.missing.push(name); continue; }
+    if (actual !== name) { out.case_conflict.push(`${actual} (in the way of ${name})`); continue; }
+    out.seen[name] = fingerprint(dest);
+    const theirs = isLink(dest) ? null : treeHash(dest);
+    if (theirs === ours) { out.in_step.push(name); continue; }
+    if (theirs && others.some((wb) => treeHash(path.join(wb, ".claude", "skills", name)) === theirs)) {
+      out.other_workbench.push(name);
+      continue;
     }
+    const linkToOurs = isLink(dest);
+    const recorded = Boolean(theirs && placed.skills[name] && placed.skills[name].hashes.includes(theirs));
+    // the same files, only a lost exec bit (the 09-23 failure): still the course's copy
+    const modesOnly = Boolean(theirs && treeHash(dest, false) === treeHash(src, false));
+    if (recorded || linkToOurs || modesOnly) out.changed.push(name);
+    else out.edited.push(name);
   }
-  return { skills_folder: folder, missing, changed, other_workbench: otherWorkbench, errors };
+  return out;
 }
 
-function copySkill(root, name, staging, dest, keep) {
+function copySkill(root, name, dest, keep) {
   const src = path.join(root, ".claude", "skills", name);
   const files = realTree(src);
   if (!files) throw Object.assign(new Error("link in source"), { code: "source_has_link" });
-  fs.rmSync(staging, { recursive: true, force: true });
-  for (const rel of files) {
-    const to = path.join(staging, rel);
-    fs.mkdirSync(path.dirname(to), { recursive: true });
-    fs.copyFileSync(path.join(src, rel), to);
-    // keep the scripts runnable: the bridge runs them by path, not through bash
-    if (!WINDOWS) fs.chmodSync(to, fs.statSync(path.join(src, rel)).mode & 0o777);
+  fs.mkdirSync(stagingRoot(), { recursive: true });
+  const staging = path.join(stagingRoot(), `${name}-${uniqueStamp()}`);
+  fs.mkdirSync(staging); // a new folder, never an existing one or a link
+  try {
+    for (const rel of files) {
+      const to = path.join(staging, rel);
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      fs.copyFileSync(path.join(src, rel), to, fs.constants.COPYFILE_EXCL);
+      // keep the scripts runnable: the bridge runs them by path, not through bash
+      if (!WINDOWS) fs.chmodSync(to, fs.statSync(path.join(src, rel)).mode & 0o777);
+    }
+    if (exists(dest)) keep(dest, path.join("skills", name)); // a link moves as a link
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.renameSync(staging, dest);
+  } catch (error) {
+    try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* our own temp copy */ }
+    throw error;
   }
-  if (isLink(dest)) fs.unlinkSync(dest); // removes the link only, never what it points at
-  else if (exists(dest)) keep(dest, path.join("skills", name));
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.renameSync(staging, dest);
 }
 
-function applyAgentMenu(root) {
+function takeLock() {
+  const file = lockFile();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      fs.mkdirSync(claudeFolder(), { recursive: true });
+      const fd = fs.openSync(file, "wx");
+      fs.writeSync(fd, `${process.pid} ${new Date().toISOString()}\n`);
+      fs.closeSync(fd);
+      return () => { try { fs.unlinkSync(file); } catch { /* already gone */ } };
+    } catch (error) {
+      if (error.code !== "EEXIST") return null;
+      // a lock older than ten minutes was left by a run that died
+      try {
+        if (isRealFile(file) && Date.now() - fs.statSync(file).mtimeMs > 10 * 60 * 1000) { fs.unlinkSync(file); continue; }
+      } catch { /* keep it */ }
+      return null;
+    }
+  }
+  return null;
+}
+
+function applyAgentMenu(root, replaceEdited) {
+  const unlock = takeLock();
+  if (!unlock) {
+    return { status: "busy", explain: "Another agent-menu update is running right now. Nothing was changed; try again in a minute." };
+  }
+  try {
+    return applyLocked(root, replaceEdited);
+  } finally {
+    unlock();
+  }
+}
+
+function applyLocked(root, replaceEdited) {
   const plan = agentMenu(root);
-  if (plan.status === "no_agents" || plan.status === "in_step") return plan;
+  if (plan.status === "no_agents") return plan;
   if (plan.linked_folders.length) {
     return { ...plan, applied: null, refused: "linked_folder",
       explain: "Your Claude agents or skills folder is a shortcut (a link) to another folder, perhaps another " +
-        "workbench's. Nothing was written, so that folder stays exactly as it is. To use the menu, the link has to " +
-        "become a real folder first; ask the course team before changing it." };
+        "workbench's. Nothing was written, so that folder stays exactly as it is. The course team can help make " +
+        "it a real folder." };
   }
   const source = path.join(root, ".claude", "agents");
   const menu = plan.menu_folder;
-  const me = workbenchId(root);
   const placed = readPlaced();
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backup = backupFolder(stamp);
-  const done = { copied: [], replaced: [], removed: [], skills_copied: [], removed_to: null, errors: [] };
+  const backup = path.join(backupRoot(), uniqueStamp());
+  const done = { copied: [], replaced: [], removed: [], claimed: [], skills_copied: [], skipped_changed_since_check: [],
+    removed_to: null, errors: [] };
   const keep = (from, rel) => {
     const to = path.join(backup, rel);
+    if (!exists(backup)) { fs.mkdirSync(backupRoot(), { recursive: true }); fs.mkdirSync(backup); }
     fs.mkdirSync(path.dirname(to), { recursive: true });
+    if (exists(to)) throw Object.assign(new Error("backup exists"), { code: "EEXIST" });
     fs.renameSync(from, to);
     done.removed_to = backup;
   };
+  const unchanged = (p, seen) => fingerprint(p) === seen;
+  const approved = (name, list) => replaceEdited.includes(name) && list.includes(name);
   fs.mkdirSync(menu, { recursive: true });
-  for (const name of [...plan.missing, ...plan.changed]) {
+
+  // claim without writing: copies that already match this workbench's are recorded as held here
+  for (const name of plan.in_step) {
+    hold(placed, "agents", name, root, fileHash(path.join(menu, name)));
+    done.claimed.push(name);
+  }
+  for (const name of plan.missing) {
     if (!COURSE_AGENTS.has(name)) continue; // the allowlist again, in case plan and list ever drift
     const dest = path.join(menu, name);
     try {
-      // copyFile onto a link would overwrite whatever the link points at
-      if (isLink(dest)) fs.unlinkSync(dest);
-      else if (exists(dest)) { keep(dest, path.join("replaced", name)); done.replaced.push(name); }
+      // on a folder that ignores case, a different-case file answers to this name: never touch it
+      if (exists(dest)) { done.skipped_changed_since_check.push(name); continue; }
       fs.copyFileSync(path.join(source, name), dest, fs.constants.COPYFILE_EXCL);
-      placed.agents[name] = { workbench: me, sha256: fileHash(dest), placed_at: new Date().toISOString() };
+      hold(placed, "agents", name, root, fileHash(dest));
+      done.copied.push(name);
+    } catch (error) {
+      done.errors.push(`${name}: ${error.code || "copy_failed"}`);
+    }
+  }
+  for (const name of [...plan.changed, ...plan.edited.filter((n) => approved(n, plan.edited))]) {
+    if (!COURSE_AGENTS.has(name)) continue;
+    const dest = path.join(menu, name);
+    try {
+      if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
+      keep(dest, path.join("replaced", name)); // a link moves as a link; what it points at is untouched
+      fs.copyFileSync(path.join(source, name), dest, fs.constants.COPYFILE_EXCL);
+      hold(placed, "agents", name, root, fileHash(dest));
+      done.replaced.push(name);
       done.copied.push(name);
     } catch (error) {
       done.errors.push(`${name}: ${error.code || "copy_failed"}`);
@@ -553,41 +741,51 @@ function applyAgentMenu(root) {
   }
   for (const name of plan.leftover) {
     if (!COURSE_AGENTS.has(name)) continue;
+    const dest = path.join(menu, name);
     try {
-      keep(path.join(menu, name), name);
-      delete placed.agents[name];
+      if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
+      keep(dest, name);
+      release(placed, "agents", name, root);
       done.removed.push(name);
     } catch (error) {
       done.errors.push(`${name}: ${error.code || "move_failed"}`);
     }
   }
-  const stagingRoot = path.join(os.homedir(), ".claude", "aibl-agent-menu-staging");
-  for (const name of [...plan.skills.missing, ...plan.skills.changed]) {
+  const sk = plan.skills;
+  for (const name of sk.in_step) {
+    hold(placed, "skills", name, root, treeHash(path.join(skillsFolder(), name)));
+    done.claimed.push(`skill ${name}`);
+  }
+  for (const name of [...sk.missing, ...sk.changed, ...sk.edited.filter((n) => approved(n, sk.edited))]) {
     if (!COURSE_SKILLS.includes(name)) continue;
-    const staging = path.join(stagingRoot, `${stamp}-${name}`);
     const dest = path.join(skillsFolder(), name);
     try {
-      copySkill(root, name, staging, dest, keep);
-      placed.skills[name] = { workbench: me, sha256: treeHash(dest), placed_at: new Date().toISOString() };
+      const expected = sk.missing.includes(name) ? "absent" : sk.seen[name];
+      if (fingerprint(dest) !== expected) { done.skipped_changed_since_check.push(`skill ${name}`); continue; }
+      copySkill(root, name, dest, keep);
+      hold(placed, "skills", name, root, treeHash(dest));
       done.skills_copied.push(name);
     } catch (error) {
       done.errors.push(`skill ${name}: ${error.code || "copy_failed"}`);
-      try { fs.rmSync(staging, { recursive: true, force: true }); } catch { /* our own temp copy */ }
     }
   }
-  try { fs.rmdirSync(stagingRoot); } catch { /* not empty or never made */ }
+  try { fs.rmdirSync(stagingRoot()); } catch { /* not empty or never made */ }
   try { writePlaced(placed); } catch (error) { done.errors.push(`record: ${error.code || "write_failed"}`); }
   return { ...agentMenu(root), applied: done, next: "Quit the app fully and open it again: the menu reads this folder only at launch. Then start a new thread before typing @." };
 }
 
 function describeAgentMenu(menu) {
-  if (!menu || (menu.status !== "out_of_step" && menu.status !== "linked_folder")) return null;
+  if (!menu || !["out_of_step", "needs_a_decision", "linked_folder"].includes(menu.status)) return null;
   const bits = [];
   if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
-  if (menu.changed.length) bits.push(`older copies in the menu than in this workbench: ${menu.changed.join(", ")}`);
+  if (menu.changed.length) bits.push(`course copies in the menu that differ from this workbench's: ${menu.changed.join(", ")}`);
   if (menu.leftover.length) bits.push(`left over in the menu from a retired seat: ${menu.leftover.join(", ")}`);
   if (menu.skills.missing.length) bits.push(`bridge skills not yet available outside this workbench: ${menu.skills.missing.join(", ")}`);
-  if (menu.skills.changed.length) bits.push(`older bridge skill copies than this workbench's: ${menu.skills.changed.join(", ")}`);
+  if (menu.skills.changed.length) bits.push(`bridge skill copies that differ from this workbench's: ${menu.skills.changed.join(", ")}`);
+  const edited = [...menu.edited, ...menu.skills.edited];
+  if (edited.length) bits.push(`copies in the user folder that carry the student's own edits (never replaced unasked): ${edited.join(", ")}`);
+  const clashes = [...menu.case_conflict, ...menu.skills.case_conflict];
+  if (clashes.length) bits.push(`files whose names differ only in capital letters are in the way (never touched): ${clashes.join(", ")}`);
   if (menu.status === "linked_folder") {
     return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
       `But ${menu.linked_folders.join(" and ")} is a link to another folder, so the fix would write into that folder. ` +
@@ -599,7 +797,9 @@ function describeAgentMenu(menu) {
     "that Claude Code's @ menu only lists agents from their user folder, and that the bridge needs its skills there to work " +
     "outside this workbench; do not hand them the command. " +
     "Only on their yes, run `node .claude/hooks/update-check.mjs --agent-menu-apply` yourself, say what it changed, " +
-    "then tell them to quit the app fully and reopen it. If they would rather not, drop it for this conversation.";
+    "then tell them to quit the app fully and reopen it. For a copy with their own edits, ask separately (\"Your copy of " +
+    "NAME has your own edits; replace it with the course version? The old one goes to a backup.\") and only on that yes " +
+    "add `--replace-edited NAME`. If they would rather not, drop it for this conversation.";
 }
 
 // ---------------------------------------------------------------------------
@@ -621,7 +821,7 @@ function samePath(a, b) {
   const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
   const x = real(a);
   const y = real(b);
-  return WINDOWS ? x.toLowerCase() === y.toLowerCase() : x === y;
+  return CASE_BLIND ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 
 function homeWorkbench(root) {

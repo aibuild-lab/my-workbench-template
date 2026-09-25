@@ -73,10 +73,12 @@ class Fixture(unittest.TestCase):
         self.commit(self.wb, "workbench")
         self.course = course
         self.git(self.wb, "remote", "add", "agent-workforce", OFFICIAL)
-        self.git(self.wb, "config", f"url.{course}.insteadOf", OFFICIAL)  # the fixture, for this test only
-        self.git(self.wb, "fetch", "-q", "agent-workforce", "student")
+        self.fetch(self.wb)
+        # the hook's own fetch must not reach the network in a test: https is switched off
         self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
-                        CLAUDE_PROJECT_DIR=str(self.wb))
+                        CLAUDE_PROJECT_DIR=str(self.wb), GIT_CONFIG_COUNT="1",
+                        GIT_CONFIG_KEY_0="protocol.https.allow", GIT_CONFIG_VALUE_0="never",
+                        GIT_TERMINAL_PROMPT="0")
         # On edition one this workbench put aibl-echo in the menu (and recorded that it did);
         # then it took edition two, which retired aibl-echo.
         agents_now = list(agents.iterdir())
@@ -120,6 +122,11 @@ class Fixture(unittest.TestCase):
 
     def git(self, repo, *args):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    def fetch(self, wb):
+        # the remote's effective URL stays official (what the hook verifies); this one fetch
+        # reads the local fixture instead
+        self.git(wb, "-c", f"url.{self.course}.insteadOf={OFFICIAL}", "fetch", "-q", "agent-workforce", "student")
 
     def commit(self, repo, message):
         self.git(repo, "add", "-A")
@@ -176,12 +183,50 @@ class StudentsOwnAgentsAreNeverTouched(Fixture):
         self.assertEqual(status.stdout, "")
 
     def test_replaced_course_copy_is_kept_not_deleted(self):
-        (self.menu / "aibl-chief-of-staff.md").write_text("an older chief\n")
+        # a copy this workbench placed earlier (so its bytes are recorded as course-made) is refreshed
+        chief = self.wb / ".claude" / "agents" / "aibl-chief-of-staff.md"
+        chief.write_text("the chief of an earlier edition\n")
+        self.run_hook("--agent-menu-apply")
+        chief.write_text("chief\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["changed"], report["edited"]), (["aibl-chief-of-staff.md"], []))
         applied = json.loads(self.run_hook("--agent-menu-apply"))
         self.assertEqual(applied["applied"]["replaced"], ["aibl-chief-of-staff.md"])
         backup = Path(applied["applied"]["removed_to"])
-        self.assertEqual((backup / "replaced" / "aibl-chief-of-staff.md").read_text(), "an older chief\n")
+        self.assertEqual((backup / "replaced" / "aibl-chief-of-staff.md").read_text(), "the chief of an earlier edition\n")
         self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "chief\n")
+
+    def test_a_copy_with_the_students_edits_is_kept_until_they_say_yes(self):
+        # finding 4: bytes that match neither a recorded placement nor a course version are the student's
+        (self.menu / "aibl-chief-of-staff.md").write_text("my own edits to the chief\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["changed"], report["edited"]), ([], ["aibl-chief-of-staff.md"]))
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "my own edits to the chief\n")
+        applied = json.loads(self.run_hook("--agent-menu-apply", "--replace-edited", "aibl-chief-of-staff.md"))
+        self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "chief\n")
+        backup = Path(applied["applied"]["removed_to"])
+        self.assertEqual((backup / "replaced" / "aibl-chief-of-staff.md").read_text(), "my own edits to the chief\n")
+
+    def test_a_published_course_version_counts_as_course_made(self):
+        (self.course / ".claude" / "agents" / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.commit(self.course, "edition three")
+        self.fetch(self.wb)
+        (self.menu / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
+
+    def test_a_different_case_name_is_never_touched(self):
+        # finding 1: on Mac and Windows AIBL-Chief-Of-Staff.md answers to aibl-chief-of-staff.md
+        (self.menu / "AIBL-Chief-Of-Staff.md").write_text("the student's own, in capitals\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual(report["missing"], [])
+        self.assertEqual(report["case_conflict"], ["AIBL-Chief-Of-Staff.md (in the way of aibl-chief-of-staff.md)"])
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertEqual(applied["applied"]["replaced"], [])
+        self.assertEqual(sorted(p.name for p in self.menu.iterdir() if p.name.lower() == "aibl-chief-of-staff.md"), ["AIBL-Chief-Of-Staff.md"])
+        self.assertEqual((self.menu / "AIBL-Chief-Of-Staff.md").read_text(), "the student's own, in capitals\n")
+        self.assertFalse((self.home / ".claude" / "aibl-agent-menu-removed").exists()
+                         and any((self.home / ".claude" / "aibl-agent-menu-removed").rglob("*hief*")))
 
     def test_hook_line_names_only_course_items(self):
         payload = json.dumps({"source": "startup", "session_id": str(uuid.uuid4()), "cwd": str(self.wb)})
@@ -219,7 +264,12 @@ class BridgeSkillsAreRealCopies(Fixture):
         if not WINDOWS:
             os.chmod(self.hskills / "aibl-bridge" / "scripts" / "bridge-run.sh", 0o644)  # the 9/23 failure
             self.assertEqual(json.loads(self.run_hook("--agent-menu"))["skills"]["changed"], ["aibl-bridge"])
-        (self.hskills / "aibl-bridge" / "SKILL.md").write_text("bridge v1\n")
+            os.chmod(self.hskills / "aibl-bridge" / "scripts" / "bridge-run.sh", 0o755)
+        # an earlier edition's bridge that this workbench placed (recorded), then a new edition
+        src = self.wb / ".claude" / "skills" / "aibl-bridge" / "SKILL.md"
+        src.write_text("bridge v1\n")
+        self.run_hook("--agent-menu-apply")
+        src.write_text("bridge v2\n")
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["skills"]["changed"], ["aibl-bridge"])
         applied = json.loads(self.run_hook("--agent-menu-apply"))
         backup = Path(applied["applied"]["removed_to"])
@@ -227,6 +277,16 @@ class BridgeSkillsAreRealCopies(Fixture):
         self.assertEqual((self.hskills / "aibl-bridge" / "SKILL.md").read_text(), "bridge v2\n")
         if not WINDOWS:
             self.assertTrue(os.stat(self.hskills / "aibl-bridge" / "scripts" / "bridge-run.sh").st_mode & stat.S_IXUSR)
+
+    def test_a_student_edited_bridge_skill_is_kept_until_they_say_yes(self):
+        self.run_hook("--agent-menu-apply")
+        (self.hskills / "aibl-bridge" / "SKILL.md").write_text("my own bridge notes\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["skills"]["changed"], report["skills"]["edited"]), ([], ["aibl-bridge"]))
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.hskills / "aibl-bridge" / "SKILL.md").read_text(), "my own bridge notes\n")
+        self.run_hook("--agent-menu-apply", "--replace-edited", "aibl-bridge")
+        self.assertEqual((self.hskills / "aibl-bridge" / "SKILL.md").read_text(), "bridge v2\n")
 
     def test_a_linked_skill_becomes_a_real_copy_without_touching_the_target(self):
         elsewhere = self.base / "another-workbench-bridge"
@@ -293,7 +353,7 @@ class LeftoverNeedsEvidence(Fixture):
         # this workbench is an edition behind: the course brought aibl-echo back in edition three
         (self.course / ".claude" / "agents" / "aibl-echo.md").write_text("echo returns\n")
         self.commit(self.course, "edition three")
-        self.git(self.wb, "fetch", "-q", "agent-workforce", "student")
+        self.fetch(self.wb)
         report = json.loads(self.run_hook("--agent-menu"))
         self.assertEqual(report["leftover"], [])
         self.assertIn("aibl-echo.md", report["not_ours"])
@@ -337,6 +397,62 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual(report["leftover"], [])
         self.run_hook("--agent-menu-apply")
         self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
+
+    def test_a_workbench_that_only_claimed_its_copy_keeps_it(self):
+        # finding 2: workbench b's copy already matched, so it copied nothing, but its apply
+        # recorded the claim; this workbench then never moves that entry out from under it
+        other = self.other_workbench({"aibl-echo.md": "echo\n"})
+        applied = self.run_in(other, "--agent-menu-apply")
+        self.assertIn("aibl-echo.md", applied["applied"]["claimed"])
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
+        self.run_hook("--agent-menu-apply")
+        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
+
+    def test_the_home_workbenchs_customized_copy_is_kept_without_a_record(self):
+        # finding 3: no record at all, but the bytes match the home workbench's current file
+        other = self.other_workbench({"aibl-chief-of-staff.md": "home workbench's own chief\n"})
+        (self.aibl / "workbench.json").write_text(json.dumps({"schema_version": "aibl.home-workbench/v1", "path": str(other)}))
+        (self.home / ".claude" / "aibl-agent-menu-placed.json").unlink()
+        (self.menu / "aibl-chief-of-staff.md").write_text("home workbench's own chief\n")
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["changed"], report["edited"], report["other_workbench"]), ([], [], ["aibl-chief-of-staff.md"]))
+        self.run_hook("--agent-menu-apply", "--replace-edited", "aibl-chief-of-staff.md")
+        self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "home workbench's own chief\n")
+
+    def test_a_remote_rewritten_away_from_the_official_repository_proves_nothing(self):
+        # finding 5: the official spelling, redirected by insteadOf, is not the official repository
+        self.git(self.wb, "config", f"url.{self.course}.insteadOf", OFFICIAL)
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
+
+    def test_a_running_apply_holds_a_lock(self):
+        lock = self.home / ".claude" / "aibl-agent-menu.lock"
+        lock.write_text("12345 now\n")
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertEqual(applied["status"], "busy")
+        self.assertFalse((self.menu / "aibl-chief-of-staff.md").exists())
+        lock.unlink()
+        self.run_hook("--agent-menu-apply")
+        self.assertTrue((self.menu / "aibl-chief-of-staff.md").exists())
+        self.assertFalse(lock.exists())
+
+    def test_backup_folders_never_collide(self):
+        first = json.loads(self.run_hook("--agent-menu-apply"))["applied"]["removed_to"]
+        self.run_hook("--agent-menu-apply")
+        (self.menu / "aibl-chief-of-staff.md").write_text("edits\n")
+        second = json.loads(self.run_hook("--agent-menu-apply", "--replace-edited", "aibl-chief-of-staff.md"))["applied"]["removed_to"]
+        self.assertNotEqual(first, second)
+        self.assertRegex(Path(second).name, r"-[0-9a-f]{8}$")
+
+    def test_a_linked_staging_folder_is_refused(self):
+        elsewhere = self.base / "elsewhere-staging"
+        elsewhere.mkdir()
+        try:
+            os.symlink(elsewhere, self.home / ".claude" / "aibl-agent-menu-staging", target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("this machine cannot create symlinks")
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertEqual(applied.get("refused"), "linked_folder")
+        self.assertEqual(list(elsewhere.iterdir()), [])
 
     def test_a_linked_agents_folder_is_refused(self):
         other = self.other_workbench({"aibl-chief-of-staff.md": "b's chief\n", "aibl-echo.md": "echo\n"})

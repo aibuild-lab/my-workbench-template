@@ -25,11 +25,12 @@ class AgentMenu(unittest.TestCase):
         course = base / "course"
         (course / ".claude" / "agents").mkdir(parents=True)
         cagents = course / ".claude" / "agents"
-        (cagents / "aibl-chief-of-staff.md").write_text("chief v2\n")
+        (cagents / "aibl-chief-of-staff.md").write_text("chief v1\n")
         (cagents / "aibl-the-professor.md").write_text("professor\n")
         (cagents / RETIRED).write_text("old seat\n")
         self.git_in(course, "init", "-q", "-b", "student")
         self.commit_in(course, "edition one")
+        (cagents / "aibl-chief-of-staff.md").write_text("chief v2\n")
         (cagents / RETIRED).unlink()
         self.commit_in(course, "edition two")
         # the student's workbench, joined to that program
@@ -46,13 +47,17 @@ class AgentMenu(unittest.TestCase):
         self.commit_all("workbench")
         (agents / "aibl-my-own-seat.md").unlink()                             # the student retired their own
         self.commit_all("retire my own seat")
-        # the official URL, rewritten to the local fixture for this test only
-        self.git("remote", "add", "agent-workforce", "https://github.com/aibuild-lab/agent-workforce.git")
-        self.git("config", f"url.{course}.insteadOf", "https://github.com/aibuild-lab/agent-workforce.git")
-        self.git("fetch", "-q", "agent-workforce", "student")
+        # the official remote; this one fetch reads the local fixture instead (the remote's
+        # effective URL stays official, which is what the hook verifies)
+        official = "https://github.com/aibuild-lab/agent-workforce.git"
+        self.git("remote", "add", "agent-workforce", official)
+        self.git("-c", f"url.{course}.insteadOf={official}", "fetch", "-q", "agent-workforce", "student")
         self.menu = self.home / ".claude" / "agents"
+        # the hook's own fetch must not reach the network in a test: https is switched off
         self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
-                        CLAUDE_PROJECT_DIR=str(self.wb))
+                        CLAUDE_PROJECT_DIR=str(self.wb), GIT_CONFIG_COUNT="1",
+                        GIT_CONFIG_KEY_0="protocol.https.allow", GIT_CONFIG_VALUE_0="never",
+                        GIT_TERMINAL_PROMPT="0")
         # on edition one this workbench put its agents in the menu (and recorded that it did)
         self.run_hook("--agent-menu-apply")
         (agents / RETIRED).unlink()                                           # then took edition two
@@ -103,7 +108,8 @@ class AgentMenu(unittest.TestCase):
         self.assertIn("AIBL agent menu check, nothing was changed", line)
         self.assertIn("aibl-the-professor.md", line)
         self.assertIn(RETIRED, line)
-        self.assertIn("older copies in the menu than in this workbench: aibl-chief-of-staff.md", line)
+        self.assertIn("course copies in the menu that differ from this workbench's: aibl-chief-of-staff.md", line)
+        self.assertNotRegex(line, r"\bolder\b")
         self.assertNotIn("aibl-other-workbench.md", line)
         self.assertIn("do not hand them the command", line)
         self.assertFalse((self.menu / "aibl-the-professor.md").exists())
@@ -138,10 +144,18 @@ class AgentMenu(unittest.TestCase):
             os.symlink(victim, dest)
         except (OSError, NotImplementedError):
             self.skipTest("this machine cannot create symlinks")
-        self.run_hook("--agent-menu-apply")
+        # a link to bytes the course never made: the student's own, kept and reported
+        applied = json.loads(self.run_hook("--agent-menu-apply"))
+        self.assertIn("aibl-chief-of-staff.md", applied["edited"])
+        self.assertTrue(dest.is_symlink())
+        self.assertEqual(victim.read_text(), "another workbench's chief\n")
+        # on the student's yes the link itself moves to the backup; what it pointed at is untouched
+        applied = json.loads(self.run_hook("--agent-menu-apply", "--replace-edited", "aibl-chief-of-staff.md"))
         self.assertEqual(victim.read_text(), "another workbench's chief\n")
         self.assertFalse(dest.is_symlink())
         self.assertEqual(dest.read_text(), "chief v2\n")
+        moved = Path(applied["applied"]["removed_to"]) / "replaced" / "aibl-chief-of-staff.md"
+        self.assertTrue(moved.is_symlink())
 
     def test_changed_contents_alone_count(self):
         # every name present, one copy stale: still out of step (another folder open runs the stale copy)
