@@ -108,8 +108,12 @@ class AgentMenu(unittest.TestCase):
         self.assertIn("AIBL agent menu check, nothing was changed", line)
         self.assertIn("aibl-the-professor.md", line)
         self.assertIn(RETIRED, line)
-        self.assertIn("course copies in the menu that differ from this workbench's: aibl-chief-of-staff.md", line)
-        self.assertNotRegex(line, r"\bolder\b")
+        # chief v1 is a version the course published before this workbench's v2: proven older.
+        # A copy is called older only with that proof (tests/older_course_copies.py has a newer one).
+        self.assertEqual(report["older"], ["aibl-chief-of-staff.md"])
+        self.assertIn("older course versions in the user folder (this workbench has a newer course version): "
+                      "aibl-chief-of-staff.md", line)
+        self.assertNotIn("course copies in the menu that differ", line)
         self.assertNotIn("aibl-other-workbench.md", line)
         self.assertIn("do not hand them the command", line)
         self.assertFalse((self.menu / "aibl-the-professor.md").exists())
