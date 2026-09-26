@@ -1,0 +1,17 @@
+{
+  "description": "AIBL workbench update check. At the start of a new conversation, says in one sentence whether a connected program or the template has something new. Fetch only; it never changes the workbench. Same script Claude Code runs from .claude/settings.json.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/update-check.mjs",
+            "timeout": 45,
+            "statusMessage": "Checking for workbench updates"
+          }
+        ]
+      }
+    ]
+  }
+}
