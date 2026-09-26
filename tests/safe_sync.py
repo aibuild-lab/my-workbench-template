@@ -291,7 +291,7 @@ class BridgeSkillsAreRealCopies(Fixture):
     def test_a_linked_skill_becomes_a_real_copy_without_touching_the_target(self):
         elsewhere = self.base / "another-workbench-bridge"
         elsewhere.mkdir()
-        (elsewhere / "SKILL.md").write_text("another workbench's bridge\n")
+        (elsewhere / "SKILL.md").write_bytes(b"another workbench's bridge\n")  # exact bytes, on Windows too
         try:
             os.symlink(elsewhere, self.hskills / "aibl-bridge", target_is_directory=True)
         except (OSError, NotImplementedError):
@@ -388,6 +388,9 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "workbench b's chief\n")
         # once workbench b is gone, this workbench may refresh it (the old copy is kept)
         import shutil
+        for p in Path(other).rglob("*"):  # git's object files are read-only, which Windows refuses to delete
+            if p.is_file() and not p.is_symlink():
+                os.chmod(p, stat.S_IREAD | stat.S_IWRITE)
         shutil.rmtree(other)
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
 
