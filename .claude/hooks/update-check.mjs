@@ -232,11 +232,14 @@ function describe(report) {
 //   - A missing name is copied only when nothing sits at that name in any letter case (Mac
 //     and Windows folders ignore case): a clash is reported as case_conflict and skipped.
 //   - An existing copy that differs from this workbench's is replaced only when its bytes
-//     are provably course-made: a version the verified course branch has published, or
-//     bytes some workbench is recorded as having placed. A copy that matches another
-//     known workbench's current file is that workbench's (other_workbench, kept). Anything
-//     else has the student's own edits (edited, kept); the agent asks the student, and
-//     only --replace-edited NAME replaces it.
+//     are provably course-made: a version the verified course branch has published at any
+//     commit of its history (CRLF or LF line endings alike: Git for Windows checks files
+//     out with CRLF), or bytes some workbench is recorded as having placed. Those are
+//     changed; the ones proven to predate this workbench's version are also listed as older.
+//     A copy that matches another known workbench's current file is that workbench's
+//     (other_workbench, kept). Anything else has changes no course version has (edited,
+//     kept); the agent asks the student, and only --replace-edited NAME replaces it.
+//     Line endings alone are not a difference (in step).
 //   - A leftover (a retired course agent) is moved only when the course's verified branch
 //     once shipped it and its current edition does not, this workbench no longer has it,
 //     this workbench is recorded as having placed exactly these bytes, and no other known
@@ -331,15 +334,40 @@ function fileHash(file) {
   try { return sha256(fs.readFileSync(file)); } catch { return null; }
 }
 
+function lineEndingsAsCommitted(bytes) {
+  // Git for Windows checks text out with CRLF line endings (core.autocrlf=true) and commits
+  // it with LF, so a Windows copy of a published file is that file with \r\n for \n. A file
+  // with a NUL byte is binary to git and is never converted.
+  if (bytes.includes(0) || !bytes.includes("\r\n")) return null;
+  return Buffer.from(bytes.toString("latin1").replace(/\r\n/g, "\n"), "latin1");
+}
+
 function gitBlobIds(file) {
-  // the id git would give these bytes, in both object formats
+  // the ids git would give these bytes, in both object formats: as they are, and as git
+  // would commit them from a CRLF checkout (see lineEndingsAsCommitted)
   try {
-    const bytes = fs.readFileSync(file);
-    const header = Buffer.from(`blob ${bytes.length}\0`);
-    return [createHash("sha1").update(header).update(bytes).digest("hex"),
-      createHash("sha256").update(header).update(bytes).digest("hex")];
+    const raw = fs.readFileSync(file);
+    const ids = [];
+    for (const bytes of [raw, lineEndingsAsCommitted(raw)]) {
+      if (!bytes) continue;
+      const header = Buffer.from(`blob ${bytes.length}\0`);
+      ids.push(createHash("sha1").update(header).update(bytes).digest("hex"),
+        createHash("sha256").update(header).update(bytes).digest("hex"));
+    }
+    return ids;
   } catch {
     return [];
+  }
+}
+
+function sameText(a, b) {
+  // the same bytes, or the same bytes but for CRLF against LF line endings
+  try {
+    const x = fs.readFileSync(a);
+    const y = fs.readFileSync(b);
+    return x.equals(y) || (lineEndingsAsCommitted(x) || x).equals(lineEndingsAsCommitted(y) || y);
+  } catch {
+    return false;
   }
 }
 
@@ -468,22 +496,31 @@ function verifiedProgramRefs(root) {
 
 function courseHistory(root) {
   // shipped: every aibl- agent a verified program branch has ever held. current: the ones
-  // its current edition holds. blobs: every version of each it ever published. No verified
-  // ref, no names: nothing is a leftover and nothing is proven course-made by the course.
+  // its current edition holds. blobs: every version of each it ever published, with how
+  // recent it is (0 = the branch's newest commit, larger = older; see olderVersion). No
+  // verified ref, no names: nothing is a leftover and nothing is proven course-made by the
+  // course.
   const shipped = new Set();
   const current = new Set();
   const blobs = new Map();
   for (const ref of verifiedProgramRefs(root)) {
-    const raw = git(root, ["log", "--raw", "--no-abbrev", "--no-renames", "--format=", ref, "--", ".claude/agents"]);
+    const raw = git(root, ["log", "--topo-order", "--raw", "--no-abbrev", "--no-renames", "--format=%H", ref, "--", ".claude/agents"]);
+    let age = -1;
     for (const line of raw.split(/\r?\n/)) {
+      if (/^[0-9a-f]{40,64}$/.test(line.trim())) { age += 1; continue; }
       const m = line.match(/^:\d+ \d+ ([0-9a-f]+) ([0-9a-f]+) \w+\t(.+)$/);
       if (!m) continue;
       const name = path.posix.basename(m[3].trim());
       if (!AGENT_FILE.test(name)) continue;
       shipped.add(name);
-      const set = blobs.get(name) || new Set();
-      for (const id of [m[1], m[2]]) if (!/^0+$/.test(id)) set.add(id);
-      blobs.set(name, set);
+      const versions = blobs.get(name) || new Map();
+      // the new side is what this commit published; the old side was current just before it
+      for (const [id, when] of [[m[2], age], [m[1], age + 0.5]]) {
+        if (/^0+$/.test(id)) continue;
+        const known = versions.get(id);
+        if (!known || (known.ref === ref && when < known.age)) versions.set(id, { ref, age: when });
+      }
+      blobs.set(name, versions);
     }
     const tip = git(root, ["ls-tree", "--name-only", `${ref}:.claude/agents`]);
     for (const p of tip.split(/\r?\n/)) {
@@ -492,6 +529,22 @@ function courseHistory(root) {
     }
   }
   return { shipped, current, blobs };
+}
+
+function publishedVersion(versions, ids) {
+  // the most recent point at which the course published any of these ids, or null
+  let best = null;
+  for (const id of ids) {
+    const v = versions && versions.get(id);
+    if (v && (!best || (v.ref === best.ref && v.age < best.age))) best = v;
+  }
+  return best;
+}
+
+function olderVersion(copy, ours) {
+  // proven older: both are versions the same course branch published, and ours came later.
+  // Anything unproven (ours customized, a newer copy, a recorded copy) is not called older.
+  return Boolean(copy && ours && copy.ref === ours.ref && copy.age > ours.age);
 }
 
 function agentMenu(root) {
@@ -509,6 +562,7 @@ function agentMenu(root) {
   const missing = [];
   const caseConflict = [];
   const changed = [];
+  const older = []; // the part of changed proven to be an older course version than this workbench's
   const edited = [];
   const otherWorkbench = [];
   const inStepNames = [];
@@ -520,7 +574,8 @@ function agentMenu(root) {
     if (actual !== name) { caseConflict.push(`${actual} (in the way of ${name})`); continue; }
     seen[name] = fingerprint(dest);
     const ours = path.join(source, name);
-    if (!isLink(dest) && sameBytes(ours, dest)) { inStepNames.push(name); continue; }
+    // line endings alone (a CRLF checkout against an LF copy) are not a difference
+    if (!isLink(dest) && sameText(ours, dest)) { inStepNames.push(name); continue; }
     const hash = fileHash(dest);
     // another known workbench's current copy: theirs
     if (hash && others.some((wb) => sameBytes(path.join(wb, ".claude", "agents", name), dest))) {
@@ -528,10 +583,15 @@ function agentMenu(root) {
       continue;
     }
     const recorded = Boolean(hash && placed.agents[name] && placed.agents[name].hashes.includes(hash));
-    const published = gitBlobIds(dest).some((id) => (history.blobs.get(name) || new Set()).has(id));
+    // any version the course ever published, at any commit of its branch, in either line ending
+    const published = publishedVersion(history.blobs.get(name), gitBlobIds(dest));
     const linkToOurs = isLink(dest) && sameBytes(ours, dest);
-    if (recorded || published || linkToOurs) changed.push(name);
-    else edited.push(name);
+    if (recorded || published || linkToOurs) {
+      changed.push(name);
+      if (olderVersion(published, publishedVersion(history.blobs.get(name), gitBlobIds(ours)))) older.push(name);
+    } else {
+      edited.push(name);
+    }
   }
   const gone = there.filter((name) => !here.includes(name));
   const leftover = gone.filter((name) => {
@@ -546,14 +606,14 @@ function agentMenu(root) {
   const notOurs = gone.filter((name) => !leftover.includes(name));
   // the bridge skills only come with the course's agents; a workbench with none gets none
   const skills = here.length ? bridgeSkills(root, placed, others)
-    : { skills_folder: skillsFolder(), missing: [], changed: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
+    : { skills_folder: skillsFolder(), missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
   const linked = linkedClaudeFolders();
   const empty = !here.length && !leftover.length;
   const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length;
   const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length;
   let status = empty ? "no_agents" : pending ? "out_of_step" : toAsk ? "needs_a_decision" : "in_step";
   if (linked.length && (pending || toAsk)) status = "linked_folder";
-  return { status, workbench: root, menu_folder: menu, missing, changed, edited, leftover, not_ours: notOurs, skipped,
+  return { status, workbench: root, menu_folder: menu, missing, changed, older, edited, leftover, not_ours: notOurs, skipped,
     other_workbench: otherWorkbench, case_conflict: caseConflict, linked_folders: linked, skills,
     in_step: inStepNames, seen };
 }
@@ -595,7 +655,7 @@ function treeHash(dir, withModes = true) {
 function bridgeSkills(root, placed, others) {
   const folder = skillsFolder();
   const byLower = entriesByLowerName(folder);
-  const out = { skills_folder: folder, missing: [], changed: [], edited: [], other_workbench: [], case_conflict: [],
+  const out = { skills_folder: folder, missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [],
     in_step: [], seen: {}, errors: [] };
   for (const name of COURSE_SKILLS) {
     const src = path.join(root, ".claude", "skills", name);
@@ -617,10 +677,48 @@ function bridgeSkills(root, placed, others) {
     const recorded = Boolean(theirs && placed.skills[name] && placed.skills[name].hashes.includes(theirs));
     // the same files, only a lost exec bit (the 09-23 failure): still the course's copy
     const modesOnly = Boolean(theirs && treeHash(dest, false) === treeHash(src, false));
-    if (recorded || linkToOurs || modesOnly) out.changed.push(name);
-    else out.edited.push(name);
+    // any version the course ever published, at any commit of its branch, in either line ending
+    const versions = theirs ? publishedSkillVersions(root, name) : [];
+    const published = theirs ? skillVersion(versions, dest) : null;
+    if (recorded || linkToOurs || modesOnly || published) {
+      out.changed.push(name);
+      if (olderVersion(published, skillVersion(versions, src))) out.older.push(name);
+    } else {
+      out.edited.push(name);
+    }
   }
   return out;
+}
+
+function publishedSkillVersions(root, name) {
+  // every version of this skill folder a verified program branch has published: its files
+  // and their blob ids, with how recent it is (0 = the newest commit that touched it)
+  const prefix = `.claude/skills/${name}/`;
+  const versions = [];
+  for (const ref of verifiedProgramRefs(root)) {
+    const commits = git(root, ["log", "--topo-order", "--format=%H", ref, "--", prefix])
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    commits.forEach((commit, age) => {
+      const files = new Map();
+      for (const entry of git(root, ["ls-tree", "-r", "-z", "--full-tree", commit, "--", prefix]).split("\0")) {
+        const m = entry.match(/^\d+ blob ([0-9a-f]+)\t(.+)$/);
+        if (m && m[2].startsWith(prefix)) files.set(m[2].slice(prefix.length), m[1]);
+      }
+      if (files.size) versions.push({ ref, age, files });
+    });
+  }
+  return versions;
+}
+
+function skillVersion(versions, dir) {
+  // the most recent published version whose files these exactly are (Finder and Explorer
+  // litter aside), in either line ending; null when none is
+  const rels = isRealDir(dir) ? realTree(dir) : null;
+  if (!rels) return null;
+  return versions.find((v) => v.files.size === rels.length && rels.every((rel) => {
+    const id = v.files.get(rel.split(path.sep).join("/"));
+    return Boolean(id) && gitBlobIds(path.join(dir, rel)).includes(id);
+  })) || null;
 }
 
 function copySkill(root, name, dest, keep) {
@@ -777,13 +875,17 @@ function applyLocked(root, replaceEdited) {
 function describeAgentMenu(menu) {
   if (!menu || !["out_of_step", "needs_a_decision", "linked_folder"].includes(menu.status)) return null;
   const bits = [];
+  const older = [...menu.older, ...menu.skills.older];
+  const differ = menu.changed.filter((n) => !menu.older.includes(n));
+  const skillsDiffer = menu.skills.changed.filter((n) => !menu.skills.older.includes(n));
   if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
-  if (menu.changed.length) bits.push(`course copies in the menu that differ from this workbench's: ${menu.changed.join(", ")}`);
+  if (older.length) bits.push(`older course versions in the user folder (this workbench has a newer course version): ${older.join(", ")}`);
+  if (differ.length) bits.push(`course copies in the menu that differ from this workbench's: ${differ.join(", ")}`);
   if (menu.leftover.length) bits.push(`left over in the menu from a retired seat: ${menu.leftover.join(", ")}`);
   if (menu.skills.missing.length) bits.push(`bridge skills not yet available outside this workbench: ${menu.skills.missing.join(", ")}`);
-  if (menu.skills.changed.length) bits.push(`bridge skill copies that differ from this workbench's: ${menu.skills.changed.join(", ")}`);
+  if (skillsDiffer.length) bits.push(`bridge skill copies that differ from this workbench's: ${skillsDiffer.join(", ")}`);
   const edited = [...menu.edited, ...menu.skills.edited];
-  if (edited.length) bits.push(`copies in the user folder that carry the student's own edits (never replaced unasked): ${edited.join(", ")}`);
+  if (edited.length) bits.push(`copies in the user folder with changes that are not from any course version (never replaced unasked): ${edited.join(", ")}`);
   const clashes = [...menu.case_conflict, ...menu.skills.case_conflict];
   if (clashes.length) bits.push(`files whose names differ only in capital letters are in the way (never touched): ${clashes.join(", ")}`);
   if (menu.status === "linked_folder") {
@@ -797,9 +899,11 @@ function describeAgentMenu(menu) {
     "that Claude Code's @ menu only lists agents from their user folder, and that the bridge needs its skills there to work " +
     "outside this workbench; do not hand them the command. " +
     "Only on their yes, run `node .claude/hooks/update-check.mjs --agent-menu-apply` yourself, say what it changed, " +
-    "then tell them to quit the app fully and reopen it. For a copy with their own edits, ask separately (\"Your copy of " +
-    "NAME has your own edits; replace it with the course version? The old one goes to a backup.\") and only on that yes " +
-    "add `--replace-edited NAME`. If they would rather not, drop it for this conversation.";
+    "then tell them to quit the app fully and reopen it. In that one offer, name each older course version in these words, " +
+    "and recommend yes: \"Your copy of NAME is an older course version; update it to the current one? The old copy goes " +
+    "to a backup.\" For a copy with changes that are not from the course, ask separately (\"Your copy of NAME has changes " +
+    "that aren't from the course; replace it with the course version? The old one goes to a backup.\") and only on that " +
+    "yes add `--replace-edited NAME`. If they would rather not, drop it for this conversation.";
 }
 
 // ---------------------------------------------------------------------------
