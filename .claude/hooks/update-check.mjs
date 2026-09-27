@@ -13,6 +13,12 @@
 //   node .claude/hooks/update-check.mjs --home-workbench [--home-workbench-apply]
 //     whether ~/.aibl/workbench.json records this workbench as the home workbench.
 //
+//   Team settings: a program never ships .claude/settings.json. A program that has settings of its
+//   own ships a merge script (PROGRAM_SETTINGS below); the check runs that script's read-only preview
+//   and reports, in the hook's one line, when the program's ask-before-sending rules are missing, so
+//   a workbench updated by an older aibl-update (which had no settings step) still hears about it at
+//   its next new conversation. The preview writes nothing; adding the settings is aibl-update's job.
+//
 // Rules, borrowed from the Camp update check that ran for months:
 //   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
 //      Its only writes are --agent-menu-apply and --home-workbench-apply, outside the
@@ -38,6 +44,11 @@ const GIT_TIMEOUT_MS = Number(process.env.AIBL_UPDATE_CHECK_TIMEOUT_MS || 20000)
 const PROGRAM_BRANCH = "student";
 const PROGRAMS = new Set(["agent-workforce", "the-lab"]);
 const LABELS = { "agent-workforce": "Agent Workforce", "the-lab": "The Lab" };
+// A program's own settings merge script, run with no arguments for a read-only JSON preview
+// (status, adds[{where, value}]). The contract is the program's: agent-native-workforce-internal,
+// workforce/house/settings-merge.mjs and its tests/test_program_settings.py.
+const PROGRAM_SETTINGS = { "agent-workforce": "workforce/house/settings-merge.mjs" };
+const SETTINGS_PREVIEW_TIMEOUT_MS = 15000;
 const SKILL_FOLDERS = ["aibl-personalize", "aibl-checkpoint", "aibl-enroll", "aibl-update"]
   .flatMap((name) => [`.claude/skills/${name}`, `.agents/skills/${name}`]);
 // the agent menu's files (see "The Claude Code agent menu"); declared up here because main() runs below
@@ -145,6 +156,8 @@ function check(root) {
       programs.push(row);
       continue;
     }
+    // Local, so it still answers when the fetch fails (offline).
+    row.team_settings = teamSettings(root, remote);
     const fetched = spawnSync("git", ["fetch", "-q", remote, PROGRAM_BRANCH], gitOptions(root));
     if (fetched.status !== 0) {
       row.error = "fetch_failed";
@@ -186,6 +199,31 @@ function check(root) {
   return { status: "checked", workbench: root, checked_at: new Date().toISOString(), programs, skills };
 }
 
+// The program's team settings, from its own read-only preview. null when the program has none
+// (or has not arrived yet); otherwise { status, missing_send_asks }. A link, a failure or a timeout
+// is "unknown", never "in step".
+function teamSettings(root, remote) {
+  const rel = PROGRAM_SETTINGS[remote];
+  if (!rel) return null;
+  const script = path.join(root, ...rel.split("/"));
+  try {
+    if (!fs.lstatSync(script).isFile()) return { status: "unknown", missing_send_asks: [] };
+  } catch {
+    return null;
+  }
+  const r = spawnSync(process.execPath, [script], { cwd: root, encoding: "utf8", timeout: SETTINGS_PREVIEW_TIMEOUT_MS,
+    stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+  try {
+    const report = JSON.parse(String(r.stdout || ""));
+    const adds = Array.isArray(report.adds) ? report.adds : [];
+    const missing = adds.filter((a) => a && a.where === "permissions.ask" && String(a.value || "").startsWith("mcp__"))
+      .map((a) => String(a.value));
+    return { status: typeof report.status === "string" ? report.status : "unknown", missing_send_asks: missing };
+  } catch {
+    return { status: "unknown", missing_send_asks: [] };
+  }
+}
+
 function isOfficialRemote(url, repository) {
   return [`https://github.com/aibuild-lab/${repository}`, `https://github.com/aibuild-lab/${repository}.git`,
     `git@github.com:aibuild-lab/${repository}.git`, `git@github.com:aibuild-lab/${repository}`,
@@ -204,9 +242,21 @@ function describe(report) {
     }
   }
   if (report.skills.changed) parts.push("the workbench skills have an update from the template");
-  if (!parts.length) return null;
-  return `AIBL workbench update check, nothing was changed: ${parts.join("; ")}. ` +
-    "Tell the student in one line and offer aibl-update, which shows what changes before merging. Do not run it unasked.";
+  const settings = [];
+  for (const p of report.programs) {
+    const t = p.team_settings;
+    if (t && t.missing_send_asks && t.missing_send_asks.length) {
+      const n = t.missing_send_asks.length;
+      settings.push(`${p.label}'s team settings are not in this workbench's .claude/settings.json yet, so the app will not ask ` +
+        `before an agent sends a message (${n === 1 ? "1 send tool has" : `${n} send tools have`} no ask rule)`);
+    }
+  }
+  if (!parts.length && !settings.length) return null;
+  const all = [...parts, ...settings];
+  const offer = settings.length
+    ? "Tell the student in one line and offer aibl-update, which shows what changes and previews the team settings, adding them only on a yes. Do not run it unasked."
+    : "Tell the student in one line and offer aibl-update, which shows what changes before merging. Do not run it unasked.";
+  return `AIBL workbench update check, nothing was changed: ${all.join("; ")}. ${offer}`;
 }
 
 // ---------------------------------------------------------------------------
