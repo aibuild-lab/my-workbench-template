@@ -4,6 +4,8 @@ This folder is the workbench. Everything you and the person you work with make l
 
 Before anything else, read every file in `context/`. That is what you know about them. If `context/project.md` is still the blank seed, you have not met them yet: offer the interview (the `aibl-personalize` skill). Never invent facts about them; ask.
 
+Pick up where you left off: continue the actual saved question or the next useful piece of work, not a fresh start. Use a course only when it is installed and relevant to what they asked for. Do not invent progress.
+
 Three folders, three jobs:
 
 - `context/` is what you know about them. They write it and correct it. You read it first, every session. `handoff.md` is where you left off; keep it current.

@@ -4,7 +4,7 @@ This is your workbench: one private folder where you and your agent do your work
 
 ## What is in it
 
-- `CLAUDE.md` and `AGENTS.md`: the note your agent reads first, every time. Claude reads the first one, Codex reads the second. Same note.
+- `AGENTS.md`: the note your agent reads first, every time. Codex reads it directly; `CLAUDE.md` is one line that points Claude at the same note.
 - `context/`: what the agent knows about you. Your project, what it may touch, decisions you have made, where you left off. You write it and correct it; the agent reads it every session.
 - `library/`: what you hand the agent to read. Transcripts, articles, documents.
 - `blueprints/`: plans the agent can follow, one file each.
