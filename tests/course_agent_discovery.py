@@ -344,6 +344,24 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.commit(fresh, "my hatch")
         self.assertEqual(self.report(fresh)["name_conflict"], ["aibl-hatch.md"])
 
+    def test_an_edited_manifest_never_outranks_the_programs_history(self):
+        # a full clone: the student changes aibl-hatch and writes its hash into the manifest too;
+        # the program commits in history say otherwise, so the file is still the student's
+        fresh = self.fresh_clone(self.enrolled_origin("student"), "fresh-edited-manifest", False)
+        hatch = fresh / ".claude" / "agents" / "aibl-hatch.md"
+        self.write(hatch, b"my own hatch\n")
+        manifest = fresh / ".aibl" / "workforce-student-edition.json"
+        data = json.loads(manifest.read_text())
+        for f in data["files"]:
+            if f["path"] == ".claude/agents/aibl-hatch.md":
+                f["sha256"] = hashlib.sha256(b"my own hatch\n").hexdigest()
+        manifest.write_text(json.dumps(data))
+        self.commit(fresh, "my hatch, and the manifest edited to match")
+        report = self.report(fresh)
+        self.assertEqual(report["name_conflict"], ["aibl-hatch.md"])
+        self.apply(fresh)
+        self.assertFalse((self.menu / "aibl-hatch.md").exists())
+
     def test_a_manifest_from_anywhere_else_proves_nothing(self):
         wb = self.workbench("fix")
         self.write_manifest(wb, repository="someone-else/agent-workforce")

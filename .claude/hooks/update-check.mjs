@@ -269,10 +269,10 @@ function describe(report) {
 // agents, never other course components):
 //   - It touches only the course's agents and COURSE_SKILLS. The course's agents are found,
 //     not listed (courseHistory): the aibl-*.md files directly in .claude/agents that the
-//     program shipped, read from every source there is: a verified program branch, the
-//     program commits this workbench itself merged (a fresh clone on a new computer has no
-//     program branch, and may be offline), and the program's edition manifest in HEAD (a
-//     shallow clone has no program commits). A name proves nothing on its own: a file is the course's only
+//     program shipped, read from a verified program branch and the program commits this
+//     workbench itself merged (a fresh clone on a new computer has no program branch, and
+//     may be offline), or, only when neither is here (a shallow clone), the program's
+//     edition manifest in HEAD. A name proves nothing on its own: a file is the course's only
 //     when its bytes are a version the program published under that name (courseMade). An
 //     aibl- agent in this workbench with any other bytes is the student's: skipped, never
 //     copied or recorded, and reported as a name_conflict when it shares a course name and
@@ -437,10 +437,17 @@ function sameText(a, b) {
 }
 
 // What an entry is right now, so apply can tell whether it changed after the plan.
-function fingerprint(p) {
+function fingerprint(p, at = p) {
+  // `at`: where the entry sat when it was planned (a moved link still resolves from there)
   try {
     const st = fs.lstatSync(p);
-    if (st.isSymbolicLink()) return `link:${fs.readlinkSync(p)}`;
+    if (st.isSymbolicLink()) {
+      // the link and what it reads: a change to either is a change
+      const target = fs.readlinkSync(p);
+      let content = null;
+      try { content = sha256(fs.readFileSync(path.resolve(path.dirname(at), target))); } catch { /* dangling or a folder */ }
+      return `link:${target}:${content}`;
+    }
     if (st.isFile()) return `file:${fileHash(p)}`;
     if (st.isDirectory()) return `dir:${treeHash(p)}`;
     return "other";
@@ -577,10 +584,14 @@ function courseHistory(root) {
   for (const ref of refs) readProgramHistory(root, history, ref, [ref], null, [ref]);
   const local = localProgramHistory(root);
   if (local) readProgramHistory(root, history, "HEAD", local.tips, local.commits, refs.length ? [] : local.newest);
+  // The manifest is the last resort, used only when neither of the above is here (a shallow
+  // clone): it is a file in the workbench, so where program history exists it adds nothing
+  // and is never trusted over it.
+  if (refs.length || local) return history;
   for (const manifest of editionManifests(root)) {
     for (const [name, sum] of manifest) {
       history.shipped.add(name);
-      if (!refs.length && !local) history.current.add(name);
+      history.current.add(name);
       const sums = history.sums.get(name) || new Set();
       sums.add(sum);
       history.sums.set(name, sums);
@@ -1023,10 +1034,16 @@ function applyLocked(root, replaceEdited) {
   // Move first, then prove: the entry is moved out of the menu in one rename, and what was
   // moved is checked against what the plan saw. Anything else (the student changed it in the
   // meantime) goes straight back where it was, untouched, and is left for the next check.
-  const takeOut = (dest, rel, seen, extra = () => true) => {
+  const takeOut = (name, dest, rel, seen, extra = () => true) => {
     const moved = keep(dest, rel);
-    if (fingerprint(moved) === seen && extra(moved)) return moved;
-    if (!exists(dest)) fs.renameSync(moved, dest);
+    if (fingerprint(moved, dest) === seen && extra(moved)) return moved;
+    if (!exists(dest)) {
+      fs.renameSync(moved, dest);
+    } else {
+      // A new entry appeared at that name within this instant. Never overwrite it: both stay,
+      // the one moved out is in the dated backup, and the report says exactly where.
+      done.errors.push(`${name}: changed during the update; the new copy is in place and the one before it is kept at ${moved}`);
+    }
     return null;
   };
   const unchanged = (p, seen) => fingerprint(p) === seen;
@@ -1071,7 +1088,7 @@ function applyLocked(root, replaceEdited) {
       if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
       const bytes = courseBytes(name); // proven before anything moves
       // a link moves as a link; what it points at is untouched
-      if (!takeOut(dest, path.join("replaced", name), plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
+      if (!takeOut(name, dest, path.join("replaced", name), plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
       fs.writeFileSync(dest, bytes, { flag: "wx" });
       hold(placed, "agents", name, root, sha256(bytes));
       done.replaced.push(name);
@@ -1086,7 +1103,7 @@ function applyLocked(root, replaceEdited) {
     try {
       if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
       const courseCopy = (moved) => isRealFile(moved) && Boolean(publishedAs(history, name, readBytes(moved)));
-      if (!takeOut(dest, name, plan.seen[name], courseCopy)) { done.skipped_changed_since_check.push(name); continue; }
+      if (!takeOut(name, dest, name, plan.seen[name], courseCopy)) { done.skipped_changed_since_check.push(name); continue; }
       release(placed, "agents", name, root);
       done.removed.push(name);
     } catch (error) {
