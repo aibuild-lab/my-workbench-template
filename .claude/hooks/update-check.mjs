@@ -907,11 +907,15 @@ function bridgeSkills(root, placed, others) {
   const byLower = entriesByLowerName(folder);
   const out = { skills_folder: folder, missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [],
     in_step: [], seen: {}, errors: [] };
+  // the workbench's own folder, as the plan saw it: the apply installs only exactly this
+  const sources = {};
+  Object.defineProperty(out, "sources", { value: sources, enumerable: false });
   for (const name of COURSE_SKILLS) {
     const src = path.join(root, ".claude", "skills", name);
     if (!isRealDir(src)) continue; // this workbench's edition does not have it
     const ours = treeHash(src);
     if (!ours) { out.errors.push(`${name}: the workbench copy holds a link, so it is not copied`); continue; }
+    sources[name] = ours;
     const actual = byLower.get(name.toLowerCase());
     const dest = path.join(folder, name);
     if (actual === undefined) { out.missing.push(name); continue; }
@@ -971,7 +975,7 @@ function skillVersion(versions, dir) {
   })) || null;
 }
 
-function copySkill(root, name, dest, keep) {
+function copySkill(root, name, dest, keep, expected) {
   const src = path.join(root, ".claude", "skills", name);
   const files = realTree(src);
   if (!files) throw Object.assign(new Error("link in source"), { code: "source_has_link" });
@@ -986,6 +990,8 @@ function copySkill(root, name, dest, keep) {
       // keep the scripts runnable: the bridge runs them by path, not through bash
       if (!WINDOWS) fs.chmodSync(to, fs.statSync(path.join(src, rel)).mode & 0o777);
     }
+    // the staged copy must be exactly the folder the plan (and the preview) saw
+    if (!expected || treeHash(staging) !== expected) throw Object.assign(new Error("changed"), { code: "changed_since_check" });
     if (exists(dest)) keep(dest, path.join("skills", name)); // a link moves as a link
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.renameSync(staging, dest);
@@ -1205,11 +1211,11 @@ function applyLocked(root, replaceEdited, expect) {
     try {
       const expected = sk.missing.includes(name) ? "absent" : sk.seen[name];
       if (fingerprint(dest) !== expected) { done.skipped_changed_since_check.push(`skill ${name}`); continue; }
-      copySkill(root, name, dest, keep);
+      copySkill(root, name, dest, keep, sk.sources[name]);
       hold(placed, "skills", name, root, treeHash(dest));
       done.skills_copied.push(name);
     } catch (error) {
-      done.errors.push(`skill ${name}: ${error.code || "copy_failed"}`);
+      if (!changedSinceCheck(`skill ${name}`, error)) done.errors.push(`skill ${name}: ${error.code || "copy_failed"}`);
     }
   }
   try { fs.rmdirSync(stagingRoot()); } catch { /* not empty or never made */ }
