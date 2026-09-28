@@ -58,8 +58,8 @@ const AGENT_FILE = /^aibl-[a-z0-9-]+\.md$/;
 // aibl- included), and never other course components. And (09-24) the team is found, never
 // listed: there is no roster of course agents in this file. The course's agents are the
 // aibl-*.md files directly in .claude/agents whose bytes are a version the program
-// published under that name, read from a connected program's VERIFIED student branch, or
-// from the program commits this workbench merged when no such branch is here yet
+// published under that name, read from a connected program's VERIFIED student branch, the
+// program commits this workbench merged, and the program's edition manifest in HEAD
 // (courseHistory, courseMade below). An old edition finds its own agents, a new edition
 // finds all of its own, and a retired name stays in that history, which is how a leftover
 // is recognized.
@@ -269,9 +269,10 @@ function describe(report) {
 // agents, never other course components):
 //   - It touches only the course's agents and COURSE_SKILLS. The course's agents are found,
 //     not listed (courseHistory): the aibl-*.md files directly in .claude/agents that the
-//     program's history shipped, read from a verified program branch, or, when there is none
-//     (a fresh clone on a new computer, perhaps offline), from the program commits this
-//     workbench itself merged. A name proves nothing on its own: a file is the course's only
+//     program shipped, read from every source there is: a verified program branch, the
+//     program commits this workbench itself merged (a fresh clone on a new computer has no
+//     program branch, and may be offline), and the program's edition manifest in HEAD (a
+//     shallow clone has no program commits). A name proves nothing on its own: a file is the course's only
 //     when its bytes are a version the program published under that name (courseMade). An
 //     aibl- agent in this workbench with any other bytes is the student's: skipped, never
 //     copied or recorded, and reported as a name_conflict when it shares a course name and
@@ -302,8 +303,9 @@ function describe(report) {
 //     records bytes the course published: it reads the workbench file once, proves it, and
 //     writes that same buffer.
 //   - It never writes through a link and refuses a linked ~/.claude, agents, skills,
-//     backup or staging folder. It holds a lock while it plans and applies, and re-checks
-//     each file just before it moves it.
+//     backup or staging folder. It holds a lock while it plans and applies. It moves an
+//     agent copy out in one rename, then proves what it moved is what the plan saw (and, for
+//     a leftover, a course version), and puts it straight back if not.
 //   - It never deletes: a replaced copy, a link it converts, and a leftover all move to a
 //     uniquely named, dated backup folder outside the folders the app reads.
 
@@ -558,22 +560,58 @@ function verifiedProgramRefs(root) {
 }
 
 function courseHistory(root) {
-  // shipped: every aibl- agent the program's history has ever held directly in .claude/agents.
+  // shipped: every aibl- agent the program has ever shipped directly in .claude/agents.
   // current: the ones its current edition holds. blobs: every version of each it ever
   // published, with how recent it is (0 = the newest commit, larger = older; see
-  // olderVersion). Read from the verified program branches when there are any; otherwise
-  // from the program commits this workbench itself merged (localProgramHistory), so a fresh
-  // clone on a new computer, with no program remote yet and perhaps offline, still knows
-  // its course. Neither, no names: nothing is a leftover and nothing is course-made.
-  const history = { shipped: new Set(), current: new Set(), blobs: new Map() };
+  // olderVersion). sums: the sha256 of each agent in the edition manifest this workbench
+  // holds. All the evidence there is, together:
+  //   - the verified program branches (their current edition is the current one);
+  //   - the program commits this workbench itself merged (localProgramHistory), so a fresh
+  //     clone on a new computer, with no program remote yet and perhaps offline, still knows
+  //     its course (their newest merged edition is the current one when no branch is here);
+  //   - the program's own edition manifest in this workbench's HEAD (editionManifests),
+  //     which even a shallow clone has.
+  // None of them, no names: nothing is a leftover and nothing is course-made.
+  const history = { shipped: new Set(), current: new Set(), blobs: new Map(), sums: new Map() };
   const refs = verifiedProgramRefs(root);
-  if (refs.length) {
-    for (const ref of refs) readProgramHistory(root, history, ref, [ref], null, [ref]);
-  } else {
-    const local = localProgramHistory(root);
-    if (local) readProgramHistory(root, history, "HEAD", local.tips, local.commits, local.newest);
+  for (const ref of refs) readProgramHistory(root, history, ref, [ref], null, [ref]);
+  const local = localProgramHistory(root);
+  if (local) readProgramHistory(root, history, "HEAD", local.tips, local.commits, refs.length ? [] : local.newest);
+  for (const manifest of editionManifests(root)) {
+    for (const [name, sum] of manifest) {
+      history.shipped.add(name);
+      if (!refs.length && !local) history.current.add(name);
+      const sums = history.sums.get(name) || new Set();
+      sums.add(sum);
+      history.sums.set(name, sums);
+    }
   }
   return history;
+}
+
+function editionManifests(root) {
+  // A program's edition manifest, as committed in HEAD: a .aibl/*.json file with schema
+  // aibl.student-edition/v1 whose repository is an official program, listing each file it
+  // shipped with the sha256 of its bytes. Agents only: name -> sha256.
+  const found = [];
+  const listed = git(root, ["ls-tree", "--name-only", "HEAD", ".aibl/"]);
+  for (const rel of listed.split(/\r?\n/).map((s) => s.trim()).filter((s) => /^\.aibl\/[^/]+\.json$/.test(s))) {
+    try {
+      const parsed = JSON.parse(gitBig(root, ["cat-file", "blob", `HEAD:${rel}`]));
+      const repo = typeof parsed.repository === "string" ? parsed.repository : "";
+      if (parsed.schema_version !== "aibl.student-edition/v1" || !Array.isArray(parsed.files)) continue;
+      if (![...PROGRAMS].some((p) => repo === `aibuild-lab/${p}`)) continue;
+      const agents = new Map();
+      for (const f of parsed.files) {
+        const where = f && typeof (f.workbench_path || f.path) === "string" ? (f.workbench_path || f.path) : "";
+        const name = path.posix.basename(where);
+        if (where !== `.claude/agents/${name}` || !AGENT_FILE.test(name)) continue;
+        if (typeof f.sha256 === "string" && /^[0-9a-f]{64}$/.test(f.sha256)) agents.set(name, f.sha256);
+      }
+      found.push(agents);
+    } catch { /* not a manifest */ }
+  }
+  return found;
 }
 
 function readProgramHistory(root, history, label, revs, only, newest) {
@@ -687,11 +725,28 @@ function courseAgents(history) {
   return history.shipped;
 }
 
+function publishedAs(history, name, bytes) {
+  // Where the program published exactly these bytes under this name (as committed, or as a
+  // CRLF checkout of it): a version from its history, or its manifest's. null: not the course's.
+  if (!bytes || !history.shipped.has(name)) return null;
+  const version = publishedVersion(history.blobs.get(name), blobIdsOf(bytes));
+  if (version) return version;
+  const sums = history.sums.get(name);
+  for (const b of [bytes, lineEndingsAsCommitted(bytes)]) {
+    if (b && sums && sums.has(sha256(b))) return { ref: "manifest", age: -1 };
+  }
+  return null;
+}
+
+function readBytes(file) {
+  try { return fs.readFileSync(file); } catch { return null; }
+}
+
 function courseMade(history, name, file) {
   // A file is the course's only when its bytes are a version the program published under
-  // this name (as committed, or as a CRLF checkout of it). The same name with other bytes
-  // is the student's: their own agent, or a course agent they changed.
-  return Boolean(history.shipped.has(name) && publishedVersion(history.blobs.get(name), gitBlobIds(file)));
+  // this name. The same name with other bytes is the student's: their own agent, or a
+  // course agent they changed.
+  return Boolean(publishedAs(history, name, readBytes(file)));
 }
 
 function agentMenu(root, history = courseHistory(root)) {
@@ -733,11 +788,11 @@ function agentMenu(root, history = courseHistory(root)) {
     // Course-made means a version the course ever published, at any commit of its branch, in
     // either line ending. A record of having placed these bytes is not enough on its own: an
     // older sync could have placed the student's own file under a course name.
-    const published = publishedVersion(history.blobs.get(name), gitBlobIds(dest));
+    const published = publishedAs(history, name, readBytes(dest));
     const linkToOurs = isLink(dest) && sameBytes(ours, dest);
     if (published || linkToOurs) {
       changed.push(name);
-      if (olderVersion(published, publishedVersion(history.blobs.get(name), gitBlobIds(ours)))) older.push(name);
+      if (olderVersion(published, publishedAs(history, name, readBytes(ours)))) older.push(name);
     } else {
       edited.push(name);
     }
@@ -963,16 +1018,26 @@ function applyLocked(root, replaceEdited) {
     if (exists(to)) throw Object.assign(new Error("backup exists"), { code: "EEXIST" });
     fs.renameSync(from, to);
     done.removed_to = backup;
+    return to;
+  };
+  // Move first, then prove: the entry is moved out of the menu in one rename, and what was
+  // moved is checked against what the plan saw. Anything else (the student changed it in the
+  // meantime) goes straight back where it was, untouched, and is left for the next check.
+  const takeOut = (dest, rel, seen, extra = () => true) => {
+    const moved = keep(dest, rel);
+    if (fingerprint(moved) === seen && extra(moved)) return moved;
+    if (!exists(dest)) fs.renameSync(moved, dest);
+    return null;
   };
   const unchanged = (p, seen) => fingerprint(p) === seen;
   const approved = (name, list) => replaceEdited.includes(name) && list.includes(name);
   fs.mkdirSync(menu, { recursive: true });
 
   // Every copy written, and every hash recorded, is a version the course published: the
-  // bytes are read once, proven, then written from that same buffer (never a new read).
+  // bytes are read once, proven, then written and hashed from that same buffer.
   const courseBytes = (name) => {
     const bytes = fs.readFileSync(path.join(source, name));
-    if (!publishedVersion(history.blobs.get(name), blobIdsOf(bytes))) {
+    if (!publishedAs(history, name, bytes)) {
       throw Object.assign(new Error("not a course version"), { code: "not_a_course_version" });
     }
     return bytes;
@@ -980,8 +1045,9 @@ function applyLocked(root, replaceEdited) {
   // claim without writing: copies that already match this workbench's are recorded as held here
   for (const name of plan.in_step) {
     const dest = path.join(menu, name);
-    if (!courseMade(history, name, dest)) { done.skipped_changed_since_check.push(name); continue; }
-    hold(placed, "agents", name, root, fileHash(dest));
+    const bytes = isRealFile(dest) ? readBytes(dest) : null;
+    if (!publishedAs(history, name, bytes)) { done.skipped_changed_since_check.push(name); continue; }
+    hold(placed, "agents", name, root, sha256(bytes));
     done.claimed.push(name);
   }
   for (const name of plan.missing) {
@@ -990,8 +1056,9 @@ function applyLocked(root, replaceEdited) {
     try {
       // on a folder that ignores case, a different-case file answers to this name: never touch it
       if (exists(dest)) { done.skipped_changed_since_check.push(name); continue; }
-      fs.writeFileSync(dest, courseBytes(name), { flag: "wx" });
-      hold(placed, "agents", name, root, fileHash(dest));
+      const bytes = courseBytes(name);
+      fs.writeFileSync(dest, bytes, { flag: "wx" });
+      hold(placed, "agents", name, root, sha256(bytes));
       done.copied.push(name);
     } catch (error) {
       done.errors.push(`${name}: ${error.code || "copy_failed"}`);
@@ -1003,9 +1070,10 @@ function applyLocked(root, replaceEdited) {
     try {
       if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
       const bytes = courseBytes(name); // proven before anything moves
-      keep(dest, path.join("replaced", name)); // a link moves as a link; what it points at is untouched
+      // a link moves as a link; what it points at is untouched
+      if (!takeOut(dest, path.join("replaced", name), plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
       fs.writeFileSync(dest, bytes, { flag: "wx" });
-      hold(placed, "agents", name, root, fileHash(dest));
+      hold(placed, "agents", name, root, sha256(bytes));
       done.replaced.push(name);
       done.copied.push(name);
     } catch (error) {
@@ -1013,11 +1081,12 @@ function applyLocked(root, replaceEdited) {
     }
   }
   for (const name of plan.leftover) {
-    if (!courseMade(history, name, path.join(menu, name)) || history.current.has(name)) continue;
+    if (!course.has(name) || history.current.has(name)) continue;
     const dest = path.join(menu, name);
     try {
       if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
-      keep(dest, name);
+      const courseCopy = (moved) => isRealFile(moved) && Boolean(publishedAs(history, name, readBytes(moved)));
+      if (!takeOut(dest, name, plan.seen[name], courseCopy)) { done.skipped_changed_since_check.push(name); continue; }
       release(placed, "agents", name, root);
       done.removed.push(name);
     } catch (error) {

@@ -9,7 +9,7 @@ directly in .claude/agents that the verified program branch has shipped at any c
 Synthetic: a throwaway course, workbench and home folder (HOME / USERPROFILE), so the real
 ~/.claude is never touched. No app, account or installation claim.
 """
-import json, os, subprocess, tempfile, unittest, uuid
+import hashlib, json, os, subprocess, tempfile, unittest, uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,8 +78,22 @@ class CourseAgentDiscovery(unittest.TestCase):
         subprocess.run(["git", "-C", str(repo), "-c", "core.autocrlf=false", *args], check=True, capture_output=True)
 
     def commit(self, repo, message):
+        if repo == self.course:
+            self.write_manifest(repo)
         self.git(repo, "add", "-A")
         self.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
+
+    def write_manifest(self, repo, repository="aibuild-lab/agent-workforce"):
+        # the program's edition manifest, as the real student edition ships it: every file with
+        # the sha256 of its bytes
+        files = []
+        for f in sorted((repo / ".claude" / "agents").rglob("*")):
+            if f.is_file():
+                rel = f.relative_to(repo).as_posix()
+                files.append({"path": rel, "sha256": hashlib.sha256(f.read_bytes()).hexdigest(),
+                              "workbench_path": rel, "status": "populated"})
+        self.write(repo / ".aibl" / "workforce-student-edition.json", json.dumps(
+            {"schema_version": "aibl.student-edition/v1", "repository": repository, "files": files}, indent=2).encode())
 
     def fetch(self, wb, branch="student"):
         # the remote's effective URL stays official (what the hook verifies); this one fetch
@@ -310,6 +324,32 @@ class CourseAgentDiscovery(unittest.TestCase):
         applied = self.apply(fresh)
         self.assertEqual(applied["applied"]["copied"], OLD_EDITION)
         self.assertEqual(self.menu_names(), OLD_EDITION)
+
+    def test_a_shallow_fresh_clone_finds_its_course_in_the_edition_manifest(self):
+        # a depth-1 clone holds no program commit at all, only the merged tree; the program's own
+        # edition manifest in it still names each agent and the sha256 of its bytes
+        origin = self.enrolled_origin("student")
+        fresh = self.base / "fresh-shallow"
+        subprocess.run(["git", "clone", "-q", "--depth", "1", origin.as_uri(), str(fresh)], check=True, capture_output=True)
+        shallow = subprocess.run(["git", "-C", str(fresh), "rev-parse", "--is-shallow-repository"],
+                                 text=True, capture_output=True, check=True).stdout.strip()
+        self.assertEqual(shallow, "true")
+        report = self.report(fresh)
+        self.assertEqual((report["status"], report["missing"], report["skipped"]),
+                         ("out_of_step", NEW_EDITION, ["aibl-my-own.md"]))
+        applied = self.apply(fresh)
+        self.assertEqual((applied["applied"]["errors"], applied["applied"]["copied"]), ([], NEW_EDITION))
+        # an edited agent in the shallow clone is still the student's
+        self.write(fresh / ".claude" / "agents" / "aibl-hatch.md", b"changed here\n")
+        self.commit(fresh, "my hatch")
+        self.assertEqual(self.report(fresh)["name_conflict"], ["aibl-hatch.md"])
+
+    def test_a_manifest_from_anywhere_else_proves_nothing(self):
+        wb = self.workbench("fix")
+        self.write_manifest(wb, repository="someone-else/agent-workforce")
+        self.commit(wb, "a manifest that is not the program's")
+        self.git(wb, "remote", "remove", "agent-workforce")
+        self.assertEqual(self.report(wb)["status"], "no_agents")
 
     # --- a name alone proves nothing: a course name with bytes the course never published ---
 
