@@ -18,6 +18,15 @@ NOT_OURS = ["aibl-chief-of-staff-lead.md", "aibl-my-own-seat.md", "aibl-other-wo
 RETIRED = "aibl-echo.md"
 
 
+def with_preview(run, args):
+    """An apply as aibl-update does it: the preview first, then the apply bound to that preview's hash.
+    An apply that names its own --expect, or asks for no preview (raw), is passed through as given."""
+    args = list(args)
+    if args and args[0] == "--agent-menu-apply" and "--expect" not in args and "--raw" not in args:
+        args += ["--expect", json.loads(run("--agent-menu"))["preview_sha256"]]
+    return [a for a in args if a != "--raw"]
+
+
 class AgentMenu(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -94,6 +103,7 @@ class AgentMenu(unittest.TestCase):
         self.commit_in(self.wb, message)
 
     def run_hook(self, *args, stdin=""):
+        args = with_preview(lambda *a: self.run_hook(*a), args)
         p = subprocess.run(["node", str(HOOK), *args], input=stdin, text=True, capture_output=True,
                            env=self.env, cwd=str(self.wb))
         self.assertEqual(p.returncode, 0, p.stderr)

@@ -41,6 +41,15 @@ def crlf(data):
     return data.replace(b"\n", b"\r\n")
 
 
+def with_preview(run, args):
+    """An apply as aibl-update does it: the preview first, then the apply bound to that preview's hash.
+    An apply that names its own --expect, or asks for no preview (raw), is passed through as given."""
+    args = list(args)
+    if args and args[0] == "--agent-menu-apply" and "--expect" not in args and "--raw" not in args:
+        args += ["--expect", json.loads(run("--agent-menu"))["preview_sha256"]]
+    return [a for a in args if a != "--raw"]
+
+
 class Fixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -126,6 +135,7 @@ class Fixture(unittest.TestCase):
         return wb
 
     def run_hook(self, wb, *args, stdin=""):
+        args = with_preview(lambda *a: self.run_hook(wb, *a), args)
         env = dict(self.env, CLAUDE_PROJECT_DIR=str(wb))
         p = subprocess.run(["node", str(HOOK), *args], input=stdin, text=True, capture_output=True, env=env, cwd=str(wb))
         self.assertEqual(p.returncode, 0, p.stderr)
@@ -393,6 +403,28 @@ class Edits(Fixture):
         self.assertEqual((applied["refused"], applied["applied"]), ("changed_since_preview", None))
         self.assertEqual((self.menu / "aibl-cipher.md").read_bytes(), b"edited after the preview\n")
         self.assertEqual(self.menu_names(), ["aibl-cipher.md"])
+
+    def test_an_apply_without_the_preview_is_refused(self):
+        # a stale or blind apply, even one that names an edited copy to replace, writes nothing
+        wb = self.workbench("fix")
+        self.write(self.menu / "aibl-hatch.md", b"the student's edits\n")
+        for extra in ((), ("--replace-edited", "aibl-hatch.md")):
+            with self.subTest(extra=extra):
+                applied = self.apply(wb, "--raw", *extra)
+                self.assertEqual((applied["refused"], applied["applied"]), ("no_preview", None))
+                self.assertEqual(self.menu_names(), ["aibl-hatch.md"])
+                self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), b"the student's edits\n")
+
+    def test_a_stale_expect_is_refused(self):
+        # the student said yes to replacing their edited copy as it was; they edit it again first
+        wb = self.workbench("fix")
+        self.write(self.menu / "aibl-hatch.md", b"the student's edits\n")
+        preview = self.report(wb)
+        self.write(self.menu / "aibl-hatch.md", b"edited again after the yes\n")
+        applied = self.apply(wb, "--expect", preview["preview_sha256"], "--replace-edited", "aibl-hatch.md")
+        self.assertEqual((applied["refused"], applied["applied"]), ("changed_since_preview", None))
+        self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), b"edited again after the yes\n")
+        self.assertEqual(self.apply(wb, "--expect", "0" * 64)["refused"], "changed_since_preview")
 
     def test_a_workbench_file_changed_after_the_preview_is_refused_too(self):
         # the preview promised the workbench's current Chief; it is swapped for another published

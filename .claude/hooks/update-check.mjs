@@ -6,7 +6,7 @@
 //     template have published, and say in one sentence whether anything is waiting.
 //   node .claude/hooks/update-check.mjs --json
 //     the same check as a report; this is what aibl-update reads before it acts.
-//   node .claude/hooks/update-check.mjs --agent-menu [--agent-menu-apply]
+//   node .claude/hooks/update-check.mjs --agent-menu [--agent-menu-apply --expect <preview_sha256>]
 //     whether Claude Code's @ agent menu lists the course's agents from this workbench, and
 //     whether the course's bridge skills are in the user's skills folder (see "The Claude
 //     Code agent menu" below); the hook adds one line when they are not.
@@ -1038,7 +1038,13 @@ function applyLocked(root, replaceEdited, expect) {
   // one reading of the course's list for the plan and for every check below
   const catalog = courseCatalog(root);
   const plan = agentMenu(root, catalog);
-  if (expect && expect !== plan.preview_sha256) {
+  // Nothing is written without the student's yes to one exact preview: --expect is required.
+  if (!expect) {
+    return { ...plan, applied: null, refused: "no_preview",
+      explain: "Nothing was changed: an apply needs --expect with the preview_sha256 of the preview the student said " +
+        "yes to. Run the preview, show it, ask, and pass that value." };
+  }
+  if (expect !== plan.preview_sha256) {
     return { ...plan, applied: null, refused: "changed_since_preview",
       explain: "Something in the menu or this workbench changed since the preview, so nothing was changed. Run the " +
         "preview again and ask again." };
