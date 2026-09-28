@@ -1,14 +1,18 @@
 """The course's sync touches only what the course shipped; the bridge skills and the home pointer.
 
 Tyler's ruling (09-24): the agent-menu sync and its cleanup touch ONLY agents the course
-itself shipped (the allowlist in update-check.mjs). Never the student's own agents in Claude
-Code or Codex, aibl- named or not, and never other course components.
+itself shipped (found in the verified program branch's history, never a list in
+update-check.mjs). Never the student's own agents in Claude Code or Codex, aibl- named or
+not, and never other course components.
 
 Synthetic: a throwaway workbench and a throwaway home folder (HOME / USERPROFILE), so the
 real ~/.claude, ~/.codex and ~/.aibl are never touched. No app, account or installation claim.
 """
-import json, os, stat, subprocess, tempfile, unittest, uuid
+import json, os, stat, subprocess, sys, tempfile, unittest, uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import course_list  # noqa: E402  (the program's list of its agents, built as the course builds it)
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
@@ -26,6 +30,15 @@ def tree(folder):
     return out
 
 
+def with_preview(run, args):
+    """An apply as aibl-update does it: the preview first, then the apply bound to that preview's hash.
+    An apply that names its own --expect, or asks for no preview (raw), is passed through as given."""
+    args = list(args)
+    if args and args[0] == "--agent-menu-apply" and "--expect" not in args and "--raw" not in args:
+        args += ["--expect", json.loads(run("--agent-menu"))["preview_sha256"]]
+    return [a for a in args if a != "--raw"]
+
+
 class Fixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -33,9 +46,9 @@ class Fixture(unittest.TestCase):
         self.base = base
         self.wb = base / "workbench"
         self.home = base / "home"
-        # The course's published branch. Edition one shipped aibl-echo, and (to prove the
-        # allowlist is the ceiling) a -lead copy that is NOT on the allowlist; edition two
-        # retired both.
+        # The course's published branch. Edition one shipped aibl-echo, and a -lead copy that
+        # this workbench never placed (so a copy of it in the menu is never this workbench's
+        # to move); edition two retired both.
         course = base / "course"
         cagents = course / ".claude" / "agents"
         cagents.mkdir(parents=True)
@@ -74,6 +87,7 @@ class Fixture(unittest.TestCase):
         self.course = course
         self.git(self.wb, "remote", "add", "agent-workforce", OFFICIAL)
         self.fetch(self.wb)
+        self.take_list(self.wb)
         # the hook's own fetch must not reach the network in a test: https is switched off
         self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
                         CLAUDE_PROJECT_DIR=str(self.wb), GIT_CONFIG_COUNT="1",
@@ -96,13 +110,13 @@ class Fixture(unittest.TestCase):
         (self.base / "hidden-skills").rename(skills)
 
         # The student's home folder: their own agents in Claude Code and Codex, a course
-        # leftover, an off-list -lead copy the course history once held, and their own skills.
+        # leftover, a -lead copy the course history once held (never placed here), and their own skills.
         self.menu = self.home / ".claude" / "agents"
         self.menu.mkdir(parents=True, exist_ok=True)
         (self.menu / "my-agent.md").write_text("my own agent\n")
         (self.menu / "aibl-custom-mine.md").write_text("my own aibl- agent\n")
         (self.menu / "aibl-chief-of-staff-lead.md").write_text("terminal chief\n")
-        (self.menu / "aibl-kansa.md").write_text("on the list, but no connected program shipped it\n")
+        (self.menu / "aibl-kansa.md").write_text("a real course name, but no connected program shipped it\n")
         self.codex = self.home / ".codex" / "agents"
         self.codex.mkdir(parents=True)
         (self.codex / "my-codex-agent.toml").write_text('name = "mine"\n')
@@ -128,11 +142,33 @@ class Fixture(unittest.TestCase):
         # reads the local fixture instead
         self.git(wb, "-c", f"url.{self.course}.insteadOf={OFFICIAL}", "fetch", "-q", "agent-workforce", "student")
 
+    def take_list(self, wb):
+        # the program's list of its agents arrives with the edition, as a merge brings it
+        course_list.adopt(wb)
+        self.commit(wb, "the course's list of its agents")
+
     def commit(self, repo, message):
+        if repo == getattr(self, "course", None) or repo.name == "course":
+            course_list.write(repo)  # every edition carries its list, as the publish step writes it
         self.git(repo, "add", "-A")
         self.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 
+    def published_once(self, name, text):
+        """The course publishes text as name in one edition, then goes back (a real past course version)."""
+        f = self.course / ".claude" / "agents" / name
+        before = f.read_text() if f.exists() else None
+        f.write_text(text)
+        self.commit(self.course, f"edition with {text.strip()}")
+        if before is None:
+            f.unlink()
+        else:
+            f.write_text(before)
+        self.commit(self.course, "edition after it")
+        self.fetch(self.wb)
+        self.take_list(self.wb)
+
     def run_hook(self, *args, stdin=""):
+        args = with_preview(lambda *a: self.run_hook(*a), args)
         p = subprocess.run(["node", str(HOOK), *args], input=stdin, text=True, capture_output=True,
                            env=self.env, cwd=str(self.wb))
         self.assertEqual(p.returncode, 0, p.stderr)
@@ -158,7 +194,7 @@ class StudentsOwnAgentsAreNeverTouched(Fixture):
         self.assertEqual(report["leftover"], ["aibl-echo.md"])
         # the student's aibl- agent in the workbench is not synced into the menu
         self.assertEqual(report["skipped"], ["aibl-custom-mine.md"])
-        # off the list, or on it but never shipped by a connected program: not ours to move
+        # never placed by this workbench, or never shipped by a connected program: not ours to move
         self.assertEqual(report["not_ours"],
                          ["aibl-chief-of-staff-lead.md", "aibl-custom-mine.md", "aibl-kansa.md"])
 
@@ -183,7 +219,8 @@ class StudentsOwnAgentsAreNeverTouched(Fixture):
         self.assertEqual(status.stdout, "")
 
     def test_replaced_course_copy_is_kept_not_deleted(self):
-        # a copy this workbench placed earlier (so its bytes are recorded as course-made) is refreshed
+        # a copy this workbench placed earlier (a course version it had then) is refreshed
+        self.published_once("aibl-chief-of-staff.md", "the chief of an earlier edition\n")
         chief = self.wb / ".claude" / "agents" / "aibl-chief-of-staff.md"
         chief.write_text("the chief of an earlier edition\n")
         self.run_hook("--agent-menu-apply")
@@ -338,9 +375,15 @@ class LeftoverNeedsEvidence(Fixture):
             (other / ".claude" / "agents" / name).write_text(body)
         self.git(other, "init", "-q", "-b", "main")
         self.commit(other, "workbench b")
+        # workbench b is enrolled in the same program: the course's agents are the ones its
+        # verified branch shipped, so a workbench with no program has none to place
+        self.git(other, "remote", "add", "agent-workforce", OFFICIAL)
+        self.fetch(other)
+        self.take_list(other)
         return other
 
     def run_in(self, wb, *args):
+        args = with_preview(lambda *a: json.dumps(self.run_in(wb, *a)), args)
         env = dict(self.env, CLAUDE_PROJECT_DIR=str(wb))
         p = subprocess.run(["node", str(HOOK), *args], text=True, capture_output=True, env=env, cwd=str(wb))
         self.assertEqual(p.returncode, 0, p.stderr)
@@ -361,6 +404,8 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
 
     def test_never_moves_what_another_workbench_placed_more_recently(self):
+        # workbench b holds a different course version of the retired seat, and placed it
+        self.published_once("aibl-echo.md", "workbench b's echo\n")
         other = self.other_workbench({"aibl-echo.md": "workbench b's echo\n"})
         self.run_in(other, "--agent-menu-apply")
         self.assertEqual((self.menu / "aibl-echo.md").read_text(), "workbench b's echo\n")
@@ -380,6 +425,8 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
 
     def test_never_replaces_another_workbenchs_newer_copy(self):
+        # workbench b holds a different course version of the Chief, and placed it
+        self.published_once("aibl-chief-of-staff.md", "workbench b's chief\n")
         other = self.other_workbench({"aibl-chief-of-staff.md": "workbench b's chief\n"})
         self.run_in(other, "--agent-menu-apply")
         report = json.loads(self.run_hook("--agent-menu"))
@@ -395,11 +442,17 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
 
     def test_a_remote_only_named_like_the_program_proves_nothing(self):
+        # a branch fetched from a remote that is merely named like the program: its list vouches
+        # for nothing, so a copy of a version only it has is not the course's
+        (self.course / ".claude" / "agents" / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.commit(self.course, "edition three")
         self.git(self.wb, "remote", "set-url", "agent-workforce", str(self.course))
+        self.git(self.wb, "fetch", "-q", "agent-workforce", "student")
+        (self.menu / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
         report = json.loads(self.run_hook("--agent-menu"))
-        self.assertEqual(report["leftover"], [])
+        self.assertEqual((report["changed"], report["edited"]), ([], ["aibl-chief-of-staff.md"]))
         self.run_hook("--agent-menu-apply")
-        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
+        self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "chief, edition three\n")
 
     def test_a_workbench_that_only_claimed_its_copy_keeps_it(self):
         # finding 2: workbench b's copy already matched, so it copied nothing, but its apply
@@ -424,8 +477,14 @@ class LeftoverNeedsEvidence(Fixture):
 
     def test_a_remote_rewritten_away_from_the_official_repository_proves_nothing(self):
         # finding 5: the official spelling, redirected by insteadOf, is not the official repository
+        (self.course / ".claude" / "agents" / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.commit(self.course, "edition three")
+        self.fetch(self.wb)
+        (self.menu / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
         self.git(self.wb, "config", f"url.{self.course}.insteadOf", OFFICIAL)
-        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["changed"], report["edited"]), ([], ["aibl-chief-of-staff.md"]))
 
     def test_a_running_apply_holds_a_lock(self):
         lock = self.home / ".claude" / "aibl-agent-menu.lock"

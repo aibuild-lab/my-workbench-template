@@ -43,7 +43,8 @@ class ProgramSettings(unittest.TestCase):
     def test_enroll_admits_exactly_the_workforce_starter_files(self):
         # Kept in step by hand with agent-native-workforce-internal tests/test_program_settings.py (ENROLL_EXACT).
         text = self.skill('aibl-enroll')
-        for name in ('.aibl/programs/agent-workforce.json', '.aibl/workforce-student-edition.json', 'library/README.md',
+        for name in ('.aibl/programs/agent-workforce.json', '.aibl/workforce-student-edition.json', '.aibl/course-agents.json',
+                     'library/README.md',
                      'library/knowledge/README.md', '.mcp.json'):
             self.assertIn('`' + name + '`', text)
 
