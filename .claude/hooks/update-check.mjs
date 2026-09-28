@@ -63,6 +63,10 @@ const AGENT_FILE = /^aibl-[a-z0-9-]+\.md$/;
 // out (CRLF). It is read from this workbench's HEAD: one small file, offline, the same time
 // whatever the history. A file is the course's only when its bytes are one of those versions.
 const COURSE_AGENTS_FILE = ".aibl/course-agents.json";
+// A seat the student named (Lesson 32): the course's naming step (aibl-agent-setup's name_seat.py)
+// records the exact sha256 of every renamed agent file it leaves, in the workbench and in the
+// global copy, here. Under work/, so a course update never touches it; read from the working tree.
+const SEAT_NAMES_FILE = "work/course/staff/seat-names.json";
 const COURSE_AGENTS_SCHEMA = 1;
 // Backward compatibility, for that edition only: editions published before the list existed
 // (agent-workforce up to 521234a) do not carry it, so a workbench whose HEAD has no list uses
@@ -406,7 +410,10 @@ function describe(report) {
 //     file is the course's only when its bytes are a version the list records for that name.
 //     An aibl- agent in this workbench with other bytes is the student's (their own, or a
 //     course agent they changed): skipped, never copied or recorded, and reported as a
-//     name_conflict when it has a course name. Anything else in the user's folders (the student's own agents and skills, aibl-
+//     name_conflict when it has a course name. The one exception is a seat the student named
+//     (SEAT_NAMES_FILE): exactly the bytes the naming step left is `renamed`, a clean state;
+//     anything else there is `rename_waiting`, one line pointing at the naming step's --reapply.
+//     Neither is ever copied, replaced or recorded, and their menu copies are left alone. Anything else in the user's folders (the student's own agents and skills, aibl-
 //     named or not, in any letter case) is not_ours and never touched. Codex's folders are
 //     never touched.
 //   - A missing name is copied only when nothing sits at that name in any letter case (Mac
@@ -715,6 +722,21 @@ function courseCatalog(root) {
   return { agents, from, aheadCurrent };
 }
 
+function readSeatNames(root) {
+  // name -> { title, sums } from the naming step's record; empty when there is none or it does not read
+  const names = new Map();
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(root, ...SEAT_NAMES_FILE.split("/")), "utf8"));
+    if (!parsed || parsed.version !== 1 || !parsed.agents || typeof parsed.agents !== "object") return names;
+    for (const [name, entry] of Object.entries(parsed.agents)) {
+      if (!AGENT_FILE.test(name) || !entry || !Array.isArray(entry.sha256)) continue;
+      const sums = new Set(entry.sha256.filter((h) => typeof h === "string" && /^[0-9a-f]{64}$/.test(h)));
+      if (sums.size) names.set(name, { title: typeof entry.title === "string" ? entry.title : name, sums });
+    }
+  } catch { /* no record: no seat was named with it */ }
+  return names;
+}
+
 function versionOf(entry, bytes) {
   // Which course version these exact bytes are: null when they are none. The list already
   // carries each version as committed and as Git for Windows checks it out, so the bytes are
@@ -766,8 +788,22 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const ourBytes = {};
   const here = [];
   const skipped = [];
+  // A seat the student named: its file is exactly what the naming step left (renamed, in step,
+  // silent), or a course update has changed it since (rename_waiting: one line saying the
+  // Technical Operator re-applies the name). Either way the hook never copies, replaces or
+  // records it, and leaves its menu copy to the naming step, which refreshes it.
+  const seatNames = readSeatNames(root);
+  const renamed = [];
+  const renameWaiting = [];
+  const renameTitles = {};
   for (const name of all) {
     const bytes = readBytes(path.join(source, name));
+    const named = agents.has(name) && seatNames.get(name);
+    if (named && bytes) {
+      renameTitles[name] = named.title;
+      (named.sums.has(sha256(bytes)) ? renamed : renameWaiting).push(name);
+      continue;
+    }
     // the course's only with a course name AND the bytes of a version the course published
     if (versionOf(agents.get(name), bytes)) { here.push(name); ourBytes[name] = bytes; } else skipped.push(name);
   }
@@ -817,7 +853,7 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   // Never copied or recorded, and always reported, whatever the menu holds (both files are
   // left exactly as they are).
   const nameConflict = skipped.filter((name) => agents.has(name));
-  const gone = there.filter((name) => !here.includes(name));
+  const gone = there.filter((name) => !here.includes(name) && !renamed.includes(name) && !renameWaiting.includes(name));
   const leftover = gone.filter((name) => {
     const entry = agents.get(name);
     // retired in this workbench's edition, and not shipped again by a newer one already fetched
@@ -836,13 +872,15 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const skills = here.length ? bridgeSkills(root, placed, others)
     : { skills_folder: skillsFolder(), missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
   const linked = linkedClaudeFolders();
-  const empty = !here.length && !leftover.length && !nameConflict.length;
+  const empty = !here.length && !leftover.length && !nameConflict.length && !renameWaiting.length;
   const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length;
-  const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length + nameConflict.length;
+  const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length + nameConflict.length +
+    renameWaiting.length;
   let status = empty ? "no_agents" : pending ? "out_of_step" : toAsk ? "needs_a_decision" : "in_step";
   if (linked.length && (pending || toAsk)) status = "linked_folder";
   const report = { status, workbench: root, menu_folder: menu, course_agents_from: catalog.from, missing, changed, older, edited,
-    leftover, not_ours: notOurs, skipped, name_conflict: nameConflict, other_workbench: otherWorkbench,
+    leftover, not_ours: notOurs, skipped, name_conflict: nameConflict, renamed, rename_waiting: renameWaiting,
+    rename_titles: renameTitles, other_workbench: otherWorkbench,
     case_conflict: caseConflict, linked_folders: linked, skills, in_step: inStepNames, seen };
   // the bytes of each workbench agent the plan would copy: the apply writes only these exact bytes
   const sources = Object.fromEntries(here.map((name) => [name, sha256(ourBytes[name])]));
@@ -859,7 +897,8 @@ function previewHash(report, root) {
   const pick = (r) => ({ missing: r.missing, changed: r.changed, older: r.older, edited: r.edited, leftover: r.leftover,
     case_conflict: r.case_conflict, other_workbench: r.other_workbench, in_step: r.in_step, seen: r.seen });
   const skillSources = Object.fromEntries(COURSE_SKILLS.map((name) => [name, treeHash(path.join(root, ".claude", "skills", name))]));
-  return sha256(Buffer.from(JSON.stringify({ agents: { ...pick(report), name_conflict: report.name_conflict, sources: report.sources },
+  return sha256(Buffer.from(JSON.stringify({ agents: { ...pick(report), name_conflict: report.name_conflict, renamed: report.renamed,
+    rename_waiting: report.rename_waiting, sources: report.sources },
     skills: { ...pick(report.skills), sources: skillSources } })));
 }
 
@@ -1241,6 +1280,10 @@ function describeAgentMenu(menu) {
   const clashes = [...menu.case_conflict, ...menu.skills.case_conflict];
   if (clashes.length) bits.push(`files whose names differ only in capital letters are in the way (never touched): ${clashes.join(", ")}`);
   const conflicts = menu.name_conflict || [];
+  const waiting = menu.rename_waiting || [];
+  for (const name of waiting) {
+    bits.push(`a course update for your renamed ${(menu.rename_titles || {})[name] || name} is waiting; Gigawatt re-applies your name`);
+  }
   if (conflicts.length) bits.push(`name conflicts, agents in this workbench named like a course agent but matching no version the course published, so they are treated as the student's own and never copied to the menu or recorded as course copies: ${conflicts.join(", ")}`);
   if (menu.status === "linked_folder") {
     return `AIBL agent menu check, nothing was changed: ${bits.join("; ")}. ` +
@@ -1260,6 +1303,10 @@ function describeAgentMenu(menu) {
     "yes add `--replace-edited NAME`. Such a copy may be an agent of their own that only shares a course agent's name: " +
     "if they say so, recommend no, and suggest they rename theirs without the aibl- prefix. If they would rather not, drop " +
     "it for this conversation." +
+    (waiting.length ? " For each renamed seat with a course update waiting, tell the student that line as it is and " +
+      "that the Technical Operator (Gigawatt) re-applies their name: it runs " +
+      "`python3 workforce/skills/aibl-agent-setup/scripts/name_seat.py --reapply` itself, which puts the name back into " +
+      "the new version and refreshes the menu copy; do not hand them the command, and nothing needs applying here." : "") +
     (conflicts.length ? " For each name conflict, tell the student plainly that the file in this workbench has the same " +
       "name as a course agent but is not a course version (their own agent, or a course agent they changed here), so the " +
       "menu sync leaves it and the menu alone; if it is an agent of their own, suggest renaming it without the aibl- " +

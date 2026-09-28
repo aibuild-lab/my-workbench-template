@@ -349,6 +349,59 @@ class NameConflicts(Fixture):
         self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mixed)
         self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
 
+    def rename(self, wb, name, new_edition_bytes, title):
+        """What Lesson 32's naming step leaves: the seat's title line renamed in the workbench file and
+        the menu copy, and the exact bytes recorded in work/course/staff/seat-names.json."""
+        import hashlib
+        named = new_edition_bytes.replace(b"\n---\n", b"\n---\n# " + title.encode() + b"\n", 1)
+        self.write(wb / ".claude" / "agents" / name, named)
+        self.write(self.menu / name, named)
+        record = {"version": 1, "agents": {name: {"seat": name[:-3], "name": title, "title": title,
+                                                   "sha256": [hashlib.sha256(named).hexdigest()]}}}
+        self.write(wb / "work" / "course" / "staff" / "seat-names.json", json.dumps(record).encode())
+        self.commit(wb, "named " + title)
+        return named
+
+    def test_a_renamed_seat_is_in_step_and_quiet_and_an_update_says_so_once(self):
+        wb = self.workbench("fix")
+        chief = "aibl-chief-of-staff.md"
+        self.apply(wb)
+        named = self.rename(wb, chief, body(chief, "fix"), "Chief of Staff (Maple)")
+        report = self.report(wb)
+        self.assertEqual((report["renamed"], report["rename_waiting"], report["name_conflict"]), ([chief], [], []))
+        self.assertNotIn(chief, report["missing"] + report["changed"] + report["edited"] + report["not_ours"])
+        self.assertEqual(report["status"], "in_step")
+        self.assertNotIn("agent menu", self.hook_line(wb))            # no nag at every new conversation
+        applied = self.apply(wb)
+        self.assertEqual(applied["applied"]["errors"], [])
+        self.assertNotIn(chief, applied["applied"]["copied"] + applied["applied"]["claimed"])
+        self.assertEqual((self.menu / chief).read_bytes(), named)
+        # a course update brings a new Chief (the placeholder is back, as the merge left it)
+        self.write(wb / ".claude" / "agents" / chief, body(chief, "the next edition"))
+        self.commit(wb, "course update")
+        report = self.report(wb)
+        self.assertEqual((report["renamed"], report["rename_waiting"], report["name_conflict"]), ([], [chief], []))
+        line = self.hook_line(wb)
+        self.assertIn("a course update for your renamed Chief of Staff (Maple) is waiting; Gigawatt re-applies your name", line)
+        self.assertIn("name_seat.py --reapply", line)
+        self.assertNotIn("name conflicts", line)
+        self.apply(wb)
+        self.assertEqual((self.menu / chief).read_bytes(), named)     # the menu copy is left for the naming step
+        # the Technical Operator re-applies the name: in step and quiet again
+        self.rename(wb, chief, body(chief, "the next edition"), "Chief of Staff (Maple)")
+        report = self.report(wb)
+        self.assertEqual((report["renamed"], report["rename_waiting"], report["status"]), ([chief], [], "in_step"))
+        self.assertNotIn("agent menu", self.hook_line(wb))
+
+    def test_a_record_for_another_seat_leaves_a_changed_chief_a_conflict(self):
+        # only the files the naming step recorded are the student's renamed seats
+        wb = self.workbench("fix")
+        self.rename(wb, "aibl-ygm.md", body("aibl-ygm.md", "old"), "Communications Writer (Ro)")
+        self.write(wb / ".claude" / "agents" / "aibl-chief-of-staff.md", b"a chief edited by hand\n")
+        self.commit(wb, "a hand edit")
+        report = self.report(wb)
+        self.assertEqual((report["renamed"], report["name_conflict"]), (["aibl-ygm.md"], ["aibl-chief-of-staff.md"]))
+
     def test_the_students_own_agents_are_untouched(self):
         wb = self.workbench("fix")
         mine = {"aibl-my-own.md": b"my own, a different copy\n", "my-agent.md": b"mine\n",
