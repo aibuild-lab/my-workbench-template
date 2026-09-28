@@ -13,10 +13,11 @@ AGENT = re.compile(r"aibl-[a-z0-9-]+\.md")
 
 
 def forms(raw):
-    lf = raw.replace(b"\r\n", b"\n")
-    out = {hashlib.sha256(raw).hexdigest(), hashlib.sha256(lf).hexdigest()}
-    if b"\0" not in raw:
-        out.add(hashlib.sha256(lf.replace(b"\n", b"\r\n")).hexdigest())
+    """As committed, and as Git for Windows checks it out (autocrlf: LF to CRLF, for text that has no
+    CRLF of its own; a NUL byte means binary, never converted)."""
+    out = {hashlib.sha256(raw).hexdigest()}
+    if b"\0" not in raw and b"\r\n" not in raw:
+        out.add(hashlib.sha256(raw.replace(b"\n", b"\r\n")).hexdigest())
     return out
 
 

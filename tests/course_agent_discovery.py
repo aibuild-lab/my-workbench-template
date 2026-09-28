@@ -394,6 +394,16 @@ class Edits(Fixture):
         self.assertEqual((self.menu / "aibl-cipher.md").read_bytes(), b"edited after the preview\n")
         self.assertEqual(self.menu_names(), ["aibl-cipher.md"])
 
+    def test_a_workbench_file_changed_after_the_preview_is_refused_too(self):
+        # the preview promised the workbench's current Chief; it is swapped for another published
+        # version (an older one) before the yes: the apply writes nothing
+        wb = self.workbench("fix")
+        report = self.report(wb)
+        self.write(wb / ".claude" / "agents" / "aibl-chief-of-staff.md", body("aibl-chief-of-staff.md", "old"))
+        applied = self.apply(wb, "--expect", report["preview_sha256"])
+        self.assertEqual((applied["refused"], applied["applied"]), ("changed_since_preview", None))
+        self.assertEqual(self.menu_names(), [])
+
     @unittest.skipIf(WINDOWS or (hasattr(os, "geteuid") and os.geteuid() == 0), "needs a folder this user cannot write")
     def test_a_failed_write_leaves_every_entry_as_it_was(self):
         wb = self.workbench("fix")

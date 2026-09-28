@@ -849,17 +849,23 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const report = { status, workbench: root, menu_folder: menu, course_agents_from: catalog.from, missing, changed, older, edited,
     leftover, not_ours: notOurs, skipped, name_conflict: nameConflict, other_workbench: otherWorkbench,
     case_conflict: caseConflict, linked_folders: linked, skills, in_step: inStepNames, seen };
-  report.preview_sha256 = previewHash(report);
+  // the bytes of each workbench agent the plan would copy: the apply writes only these exact bytes
+  const sources = Object.fromEntries(here.map((name) => [name, sha256(ourBytes[name])]));
+  Object.defineProperty(report, "sources", { value: sources, enumerable: false });
+  report.preview_sha256 = previewHash(report, root);
   return report;
 }
 
-function previewHash(report) {
-  // What the preview showed, as one value: every list the apply acts on and every entry it
-  // saw (the same fingerprints the apply compares). --agent-menu-apply --expect VALUE refuses
-  // to act unless its own fresh plan hashes to exactly this.
-  const pick = (r) => ({ missing: r.missing, changed: r.changed, edited: r.edited, leftover: r.leftover,
-    case_conflict: r.case_conflict, in_step: r.in_step, seen: r.seen });
-  return sha256(Buffer.from(JSON.stringify({ agents: pick(report), skills: pick(report.skills) })));
+function previewHash(report, root) {
+  // What the preview showed, as one value: every list it showed, every entry it saw (the same
+  // fingerprints the apply compares), and the exact bytes it would copy, agents and bridge
+  // skills alike. --agent-menu-apply --expect VALUE refuses to act unless its own fresh plan
+  // hashes to exactly this.
+  const pick = (r) => ({ missing: r.missing, changed: r.changed, older: r.older, edited: r.edited, leftover: r.leftover,
+    case_conflict: r.case_conflict, other_workbench: r.other_workbench, in_step: r.in_step, seen: r.seen });
+  const skillSources = Object.fromEntries(COURSE_SKILLS.map((name) => [name, treeHash(path.join(root, ".claude", "skills", name))]));
+  return sha256(Buffer.from(JSON.stringify({ agents: { ...pick(report), name_conflict: report.name_conflict, sources: report.sources },
+    skills: { ...pick(report.skills), sources: skillSources } })));
 }
 
 function realTree(dir) {
@@ -1069,33 +1075,46 @@ function applyLocked(root, replaceEdited, expect) {
   //      fails if anything has appeared there since).
   // Any failure removes only the temp file; the entry in the menu stays exactly as it was.
   const courseBytes = (name) => {
+    // exactly the bytes the plan saw in the workbench, and a course version
     const bytes = fs.readFileSync(path.join(source, name));
+    if (sha256(bytes) !== plan.sources[name]) throw Object.assign(new Error("changed"), { code: "changed_since_check" });
     if (!versionOf(catalog.agents.get(name), bytes)) {
       throw Object.assign(new Error("not a course version"), { code: "not_a_course_version" });
     }
     return bytes;
   };
+  const writeAll = (file, bytes) => {
+    // a new file (never an existing one or a link), every byte written, flushed to disk; on
+    // any failure the partial file is removed
+    const fd = fs.openSync(file, "wx");
+    try {
+      try {
+        for (let at = 0; at < bytes.length;) at += fs.writeSync(fd, bytes, at, bytes.length - at);
+        fs.fsyncSync(fd);
+      } finally {
+        fs.closeSync(fd);
+      }
+    } catch (error) {
+      try { fs.unlinkSync(file); } catch { /* never made */ }
+      throw error;
+    }
+  };
   const staged = (bytes) => {
     const temp = path.join(menu, `.aibl-agent-menu-${uniqueStamp()}.tmp`);
-    const fd = fs.openSync(temp, "wx"); // a new file, never an existing one or a link
-    try {
-      fs.writeSync(fd, bytes);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
+    writeAll(temp, bytes);
     return temp;
   };
   const dropTemp = (temp) => { try { fs.unlinkSync(temp); } catch { /* already in place, or never made */ } };
   const backupCopy = (snap, rel) => {
     const to = path.join(backupFolder(), rel);
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    if (snap.link) {
-      fs.symlinkSync(snap.target, to);
-    } else {
-      const fd = fs.openSync(to, "wx");
-      try { fs.writeSync(fd, snap.bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    }
+    if (snap.link) fs.symlinkSync(snap.target, to);
+    else writeAll(to, snap.bytes);
+    return to;
+  };
+  const changedSinceCheck = (name, error) => {
+    if (error && error.code === "changed_since_check") { done.skipped_changed_since_check.push(name); return true; }
+    return false;
   };
 
   // claim without writing: copies that already match this workbench's are recorded as held here
@@ -1121,7 +1140,7 @@ function applyLocked(root, replaceEdited, expect) {
       done.copied.push(name);
     } catch (error) {
       if (error.code === "EEXIST") done.skipped_changed_since_check.push(name);
-      else done.errors.push(`${name}: ${error.code || "copy_failed"}`);
+      else if (!changedSinceCheck(name, error)) done.errors.push(`${name}: ${error.code || "copy_failed"}`);
     } finally {
       if (temp) dropTemp(temp);
     }
@@ -1132,16 +1151,22 @@ function applyLocked(root, replaceEdited, expect) {
     try {
       const bytes = courseBytes(name);
       temp = staged(bytes);
-      const snap = snapshot(dest);
-      if (snap.fp !== plan.seen[name]) { done.skipped_changed_since_check.push(name); continue; }
-      backupCopy(snap, path.join("replaced", name));
+      const before = snapshot(dest);
+      if (before.fp !== plan.seen[name]) { done.skipped_changed_since_check.push(name); continue; }
+      const kept = backupCopy(before, path.join("replaced", name));
+      // the last look, with nothing but this one read between it and the rename
+      if (snapshot(dest).fp !== plan.seen[name]) {
+        try { fs.unlinkSync(kept); } catch { /* leave it; it is only a copy */ }
+        done.skipped_changed_since_check.push(name);
+        continue;
+      }
       fs.renameSync(temp, dest); // replaces the entry itself; a link's target is never written
       temp = null;
       hold(placed, "agents", name, root, sha256(bytes));
       done.replaced.push(name);
       done.copied.push(name);
     } catch (error) {
-      done.errors.push(`${name}: ${error.code || "copy_failed"}`);
+      if (!changedSinceCheck(name, error)) done.errors.push(`${name}: ${error.code || "copy_failed"}`);
     } finally {
       if (temp) dropTemp(temp);
     }
@@ -1154,7 +1179,12 @@ function applyLocked(root, replaceEdited, expect) {
         done.skipped_changed_since_check.push(name);
         continue;
       }
-      backupCopy(snap, name); // the backup copy is on disk before the entry goes
+      const kept = backupCopy(snap, name); // the backup copy is on disk before the entry goes
+      if (snapshot(dest).fp !== plan.seen[name]) {
+        try { fs.unlinkSync(kept); } catch { /* leave it; it is only a copy */ }
+        done.skipped_changed_since_check.push(name);
+        continue;
+      }
       fs.unlinkSync(dest);
       release(placed, "agents", name, root);
       done.removed.push(name);
