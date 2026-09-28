@@ -12,11 +12,24 @@ LIST = ".aibl/course-agents.json"
 AGENT = re.compile(r"aibl-[a-z0-9-]+\.md")
 
 
+def converted(raw):
+    """Whether Git for Windows (core.autocrlf=true) turns LF into CRLF on checkout: git's own text test
+    (no NUL, no CR at all, printable >> 7 not below nonprintable), as the publish step applies it."""
+    if b"\0" in raw or b"\r" in raw:
+        return False
+    printable = nonprintable = 0
+    for c in raw:
+        if c == 127 or (c < 32 and c not in (8, 9, 10, 12, 27)):
+            nonprintable += 1
+        elif c != 10:
+            printable += 1
+    return b"\n" in raw and (printable >> 7) >= nonprintable
+
+
 def forms(raw):
-    """As committed, and as Git for Windows checks it out (autocrlf: LF to CRLF, for text that has no
-    CRLF of its own; a NUL byte means binary, never converted)."""
+    """As committed, and as Git for Windows checks it out."""
     out = {hashlib.sha256(raw).hexdigest()}
-    if b"\0" not in raw and b"\r\n" not in raw:
+    if converted(raw):
         out.add(hashlib.sha256(raw.replace(b"\n", b"\r\n")).hexdigest())
     return out
 

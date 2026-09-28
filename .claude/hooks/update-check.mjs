@@ -1134,7 +1134,9 @@ function applyLocked(root, replaceEdited, expect) {
         fs.linkSync(temp, dest); // fails if anything sits at that name, in any letter case on Mac and Windows
       } catch (error) {
         if (error.code === "EEXIST") { done.skipped_changed_since_check.push(name); continue; }
-        fs.copyFileSync(temp, dest, fs.constants.COPYFILE_EXCL); // a folder without hard links: still never over anything
+        // a folder without hard links: a new file (never over anything), written in full and
+        // flushed, and removed again if the write fails
+        writeAll(dest, bytes);
       }
       hold(placed, "agents", name, root, sha256(bytes));
       done.copied.push(name);
