@@ -133,6 +133,19 @@ class Fixture(unittest.TestCase):
         self.git(repo, "add", "-A")
         self.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 
+    def published_once(self, name, text):
+        """The course publishes text as name in one edition, then goes back (a real past course version)."""
+        f = self.course / ".claude" / "agents" / name
+        before = f.read_text() if f.exists() else None
+        f.write_text(text)
+        self.commit(self.course, f"edition with {text.strip()}")
+        if before is None:
+            f.unlink()
+        else:
+            f.write_text(before)
+        self.commit(self.course, "edition after it")
+        self.fetch(self.wb)
+
     def run_hook(self, *args, stdin=""):
         p = subprocess.run(["node", str(HOOK), *args], input=stdin, text=True, capture_output=True,
                            env=self.env, cwd=str(self.wb))
@@ -184,7 +197,8 @@ class StudentsOwnAgentsAreNeverTouched(Fixture):
         self.assertEqual(status.stdout, "")
 
     def test_replaced_course_copy_is_kept_not_deleted(self):
-        # a copy this workbench placed earlier (so its bytes are recorded as course-made) is refreshed
+        # a copy this workbench placed earlier (a course version it had then) is refreshed
+        self.published_once("aibl-chief-of-staff.md", "the chief of an earlier edition\n")
         chief = self.wb / ".claude" / "agents" / "aibl-chief-of-staff.md"
         chief.write_text("the chief of an earlier edition\n")
         self.run_hook("--agent-menu-apply")
@@ -366,6 +380,8 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
 
     def test_never_moves_what_another_workbench_placed_more_recently(self):
+        # workbench b holds a different course version of the retired seat, and placed it
+        self.published_once("aibl-echo.md", "workbench b's echo\n")
         other = self.other_workbench({"aibl-echo.md": "workbench b's echo\n"})
         self.run_in(other, "--agent-menu-apply")
         self.assertEqual((self.menu / "aibl-echo.md").read_text(), "workbench b's echo\n")
@@ -385,6 +401,8 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
 
     def test_never_replaces_another_workbenchs_newer_copy(self):
+        # workbench b holds a different course version of the Chief, and placed it
+        self.published_once("aibl-chief-of-staff.md", "workbench b's chief\n")
         other = self.other_workbench({"aibl-chief-of-staff.md": "workbench b's chief\n"})
         self.run_in(other, "--agent-menu-apply")
         report = json.loads(self.run_hook("--agent-menu"))

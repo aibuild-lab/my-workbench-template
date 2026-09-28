@@ -48,6 +48,8 @@ class CourseAgentDiscovery(unittest.TestCase):
         cagents = self.course / ".claude" / "agents"
         for name in OLD_EDITION:
             self.write(cagents / name, body(name, "old"))
+        # every published edition carries the program's stamp, never the template's
+        self.write(self.course / ".aibl" / "programs" / "agent-workforce.json", b"{}\n")
         self.git(self.course, "init", "-q", "-b", "student")
         self.commit(self.course, "Student edition, old (8 agents)")
         self.git(self.course, "branch", "old-student")
@@ -240,7 +242,8 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.assertEqual((self.menu / "aibl-holler.md").read_bytes(), b"the student edited this copy\n")
 
     def test_no_verified_program_means_no_course_agents(self):
-        # a remote merely named like the program proves nothing: nothing is the course's to copy
+        # a remote merely named like the program proves nothing, and this workbench never merged
+        # the program: nothing is the course's to copy
         wb = self.workbench("fix")
         self.git(wb, "remote", "set-url", "agent-workforce", str(self.course))
         report = self.report(wb)
@@ -249,6 +252,116 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.apply(wb)
         self.assertEqual(self.menu_names(), [])
         self.assertEqual(self.hook_line(wb), "")
+
+
+    # --- a fresh clone on a new computer: no program remote-tracking ref, perhaps offline ---
+
+    def enrolled_origin(self, branch):
+        """A workbench that enrolled (merged the program as aibl-enroll does), pushed to the
+        student's own repository. Returns that repository."""
+        wb = self.base / f"enrolled-{branch}"
+        self.write(wb / ".aibl" / "template.json", b"{}\n")
+        self.write(wb / ".claude" / "agents" / "aibl-my-own.md", b"an aibl- agent the student made\n")
+        self.git(wb, "init", "-q", "-b", "main")
+        self.commit(wb, "workbench")
+        self.git(wb, "remote", "add", "agent-workforce", OFFICIAL)
+        self.fetch(wb, branch)
+        self.git(wb, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "-q",
+                 "--allow-unrelated-histories", "--no-ff", "-m", "Add Agent Workforce", "agent-workforce/student")
+        origin = self.base / f"origin-{branch}.git"
+        subprocess.run(["git", "clone", "-q", "--bare", str(wb), str(origin)], check=True, capture_output=True)
+        return origin
+
+    def fresh_clone(self, origin, name, readd_remote):
+        """Cloned fresh: only `origin`, no program ref. Git's https is switched off in these
+        tests, so any fetch of the official remote fails exactly as it would offline."""
+        fresh = self.base / name
+        subprocess.run(["git", "clone", "-q", str(origin), str(fresh)], check=True, capture_output=True)
+        if readd_remote:
+            self.git(fresh, "remote", "add", "agent-workforce", OFFICIAL)  # re-added, never fetched
+        refs = subprocess.run(["git", "-C", str(fresh), "for-each-ref", "refs/remotes/agent-workforce"],
+                              text=True, capture_output=True, check=True).stdout
+        self.assertEqual(refs, "")
+        return fresh
+
+    def test_a_fresh_clone_offline_still_offers_the_agents_it_merged(self):
+        origin = self.enrolled_origin("student")
+        for readd in (False, True):
+            with self.subTest(program_remote_readded=readd):
+                if self.menu.exists():
+                    for p in self.menu.iterdir():
+                        p.unlink()
+                fresh = self.fresh_clone(origin, f"fresh-{readd}", readd)
+                report = self.report(fresh)
+                self.assertEqual((report["status"], report["missing"]), ("out_of_step", NEW_EDITION))
+                self.assertEqual(report["skipped"], ["aibl-my-own.md"])
+                # the session-start hook: its fetch fails (offline), yet it exits 0 and speaks
+                self.assertIn("aibl-hatch.md", self.hook_line(fresh))
+                applied = self.apply(fresh)
+                self.assertEqual((applied["applied"]["errors"], applied["applied"]["copied"]), ([], NEW_EDITION))
+                self.assertEqual(applied["status"], "in_step")
+                self.assertEqual(self.menu_names(), NEW_EDITION)
+
+    def test_a_fresh_clone_of_an_old_edition_offers_its_eight(self):
+        fresh = self.fresh_clone(self.enrolled_origin("old-student"), "fresh-old", False)
+        report = self.report(fresh)
+        self.assertEqual((report["status"], report["missing"], report["skipped"]),
+                         ("out_of_step", OLD_EDITION, ["aibl-my-own.md"]))
+        applied = self.apply(fresh)
+        self.assertEqual(applied["applied"]["copied"], OLD_EDITION)
+        self.assertEqual(self.menu_names(), OLD_EDITION)
+
+    # --- a name alone proves nothing: a course name with bytes the course never published ---
+
+    def placed(self):
+        f = self.home / ".claude" / "aibl-agent-menu-placed.json"
+        return json.loads(f.read_text()) if f.exists() else {"agents": {}}
+
+    def test_a_personal_menu_agent_with_a_newly_shipped_course_name_is_never_replaced(self):
+        # an older-edition student made ~/.claude/agents/aibl-hatch.md; the course now ships aibl-hatch
+        mine = b"my own hatch, made before the course had one\n"
+        self.write(self.menu / "aibl-hatch.md", mine)
+        wb = self.workbench("fix")
+        report = self.report(wb)
+        self.assertEqual((report["edited"], report["changed"]), (["aibl-hatch.md"], []))
+        self.assertIn("may be an agent of their own that only shares a course agent's name", self.hook_line(wb))
+        applied = self.apply(wb)
+        self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
+        self.assertNotIn("aibl-hatch.md", applied["applied"]["claimed"] + applied["applied"]["copied"])
+        self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
+        # and it stays the student's on every later run
+        self.apply(wb)
+        self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
+
+    def test_a_workbench_agent_with_a_course_name_but_not_course_bytes_is_the_students(self):
+        # an old-edition workbench has the student's own aibl-hatch.md; the fetched edition ships one
+        mine = b"my own hatch, in my workbench\n"
+        wb = self.workbench("old")
+        self.write(wb / ".claude" / "agents" / "aibl-hatch.md", mine)
+        self.commit(wb, "my own hatch")
+        report = self.report(wb)
+        self.assertEqual(report["name_conflict"], ["aibl-hatch.md"])
+        self.assertIn("aibl-hatch.md", report["skipped"])
+        self.assertNotIn("aibl-hatch.md", report["missing"])
+        self.assertIn("name conflicts", self.hook_line(wb))
+        applied = self.apply(wb)
+        self.assertEqual(applied["applied"]["copied"], OLD_EDITION)
+        self.assertFalse((self.menu / "aibl-hatch.md").exists())
+        self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
+        # the student put their own copy in the menu themselves: settled, and never claimed
+        self.write(self.menu / "aibl-hatch.md", mine)
+        report = self.report(wb)
+        self.assertEqual((report["name_conflict"], report["status"]), ([], "in_step"))
+        self.apply(wb)
+        self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
+        # later the workbench takes the course's aibl-hatch: the menu copy is still theirs, never
+        # replaced without their own yes
+        self.write(wb / ".claude" / "agents" / "aibl-hatch.md", body("aibl-hatch.md", "new"))
+        self.commit(wb, "took the course's hatch")
+        report = self.report(wb)
+        self.assertEqual((report["edited"], report["changed"], report["name_conflict"]), (["aibl-hatch.md"], [], []))
+        self.apply(wb)
+        self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
 
 
 if __name__ == "__main__":
