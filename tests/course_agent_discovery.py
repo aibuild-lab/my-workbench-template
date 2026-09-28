@@ -306,12 +306,16 @@ class NameConflicts(Fixture):
         self.assertNotIn("aibl-hatch.md", applied["applied"]["copied"])
         self.assertFalse((self.menu / "aibl-hatch.md").exists())
         self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
-        # the student put their own copy in the menu themselves: settled, and never claimed
+        # the student put the same file in the menu themselves: still a conflict, still never
+        # claimed, and both copies stay exactly as they are
         self.write(self.menu / "aibl-hatch.md", mine)
         report = self.report(wb)
-        self.assertEqual((report["name_conflict"], report["status"]), ([], "in_step"))
+        self.assertEqual((report["name_conflict"], report["status"]), (["aibl-hatch.md"], "needs_a_decision"))
+        self.assertIn("name conflicts", self.hook_line(wb))
         self.apply(wb)
         self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
+        self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
+        self.assertEqual((wb / ".claude" / "agents" / "aibl-hatch.md").read_bytes(), mine)
         # later the workbench takes the course's aibl-hatch: the menu copy is still theirs
         self.write(wb / ".claude" / "agents" / "aibl-hatch.md", body("aibl-hatch.md", "new"))
         self.commit(wb, "took the course's hatch")
@@ -319,6 +323,31 @@ class NameConflicts(Fixture):
         self.assertEqual((report["edited"], report["changed"], report["name_conflict"]), (["aibl-hatch.md"], [], []))
         self.apply(wb)
         self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
+
+    def test_a_mixed_line_ending_file_no_version_has_is_a_name_conflict(self):
+        # a published version with only some of its line endings turned into CRLF: its bytes match
+        # neither form the list records, so it is not the course's, never copied or recorded
+        wb = self.workbench("fix")
+        lf = (wb / ".claude" / "agents" / "aibl-hatch.md").read_bytes()
+        mixed = lf.replace(b"\n", b"\r\n", 1)
+        self.assertNotEqual(mixed, lf)
+        self.assertNotEqual(mixed, crlf(lf))
+        self.write(wb / ".claude" / "agents" / "aibl-hatch.md", mixed)
+        self.commit(wb, "a mixed-ending hatch")
+        report = self.report(wb)
+        self.assertEqual(report["name_conflict"], ["aibl-hatch.md"])
+        self.assertNotIn("aibl-hatch.md", report["missing"])
+        # the same bytes in the menu, beside the workbench's own published hatch: the same text, so
+        # in step (line endings alone are no difference), but never recorded as a course copy
+        self.write(wb / ".claude" / "agents" / "aibl-hatch.md", lf)
+        self.commit(wb, "the published hatch again")
+        self.write(self.menu / "aibl-hatch.md", mixed)
+        report = self.report(wb)
+        self.assertIn("aibl-hatch.md", report["in_step"])
+        applied = self.apply(wb)
+        self.assertNotIn("aibl-hatch.md", applied["applied"]["claimed"])
+        self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mixed)
+        self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
 
     def test_the_students_own_agents_are_untouched(self):
         wb = self.workbench("fix")

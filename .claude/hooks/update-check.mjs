@@ -406,8 +406,7 @@ function describe(report) {
 //     file is the course's only when its bytes are a version the list records for that name.
 //     An aibl- agent in this workbench with other bytes is the student's (their own, or a
 //     course agent they changed): skipped, never copied or recorded, and reported as a
-//     name_conflict when it has a course name and the menu does not already hold that same
-//     file. Anything else in the user's folders (the student's own agents and skills, aibl-
+//     name_conflict when it has a course name. Anything else in the user's folders (the student's own agents and skills, aibl-
 //     named or not, in any letter case) is not_ours and never touched. Codex's folders are
 //     never touched.
 //   - A missing name is copied only when nothing sits at that name in any letter case (Mac
@@ -717,15 +716,15 @@ function courseCatalog(root) {
 }
 
 function versionOf(entry, bytes) {
-  // Which course version these bytes are, as committed or as a CRLF checkout of one:
-  // null when they are none. here: a version this workbench's own edition lists (so no newer
-  // than it); current: the version that edition ships now.
+  // Which course version these exact bytes are: null when they are none. The list already
+  // carries each version as committed and as Git for Windows checks it out, so the bytes are
+  // never normalized first (a mixed-ending file no version has is not the course's). here: a
+  // version this workbench's own edition lists (so no newer than it); current: the version
+  // that edition ships now.
   if (!entry || !bytes) return null;
-  const sums = [sha256(bytes)];
-  const committed = lineEndingsAsCommitted(bytes);
-  if (committed) sums.push(sha256(committed));
-  if (!sums.some((s) => entry.published.has(s))) return null;
-  return { here: sums.some((s) => entry.here.has(s)), current: sums.some((s) => entry.current.has(s)) };
+  const sum = sha256(bytes);
+  if (!entry.published.has(sum)) return null;
+  return { here: entry.here.has(sum), current: entry.current.has(sum) };
 }
 
 function readBytes(file) {
@@ -815,13 +814,9 @@ function agentMenu(root, catalog = courseCatalog(root)) {
     }
   }
   // A course name in this workbench with bytes the course never published: the student's.
-  // Never copied or recorded; reported unless the menu already holds that same file (a seat
-  // the student named, whose menu copy their naming step refreshed, is settled).
-  const nameConflict = skipped.filter((name) => {
-    if (!agents.has(name)) return false;
-    const snap = snapshot(path.join(menu, byLower.get(name.toLowerCase()) || name));
-    return !(!snap.link && sameTextBytes(readBytes(path.join(source, name)), snap.bytes));
-  });
+  // Never copied or recorded, and always reported, whatever the menu holds (both files are
+  // left exactly as they are).
+  const nameConflict = skipped.filter((name) => agents.has(name));
   const gone = there.filter((name) => !here.includes(name));
   const leftover = gone.filter((name) => {
     const entry = agents.get(name);
