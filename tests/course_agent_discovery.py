@@ -393,6 +393,31 @@ class NameConflicts(Fixture):
         self.assertEqual((report["renamed"], report["rename_waiting"], report["status"]), ([chief], [], "in_step"))
         self.assertNotIn("agent menu", self.hook_line(wb))
 
+    def test_a_fresh_clone_gets_the_renamed_chief_added_and_an_existing_entry_is_kept(self):
+        wb = self.workbench("fix")
+        chief = "aibl-chief-of-staff.md"
+        named = self.rename(wb, chief, body(chief, "fix"), "Chief of Staff (Maple)")
+        (self.menu / chief).unlink()                     # a new computer: the menu has no Chief at all
+        report = self.report(wb)
+        self.assertEqual((report["renamed"], report["renamed_missing"], report["name_conflict"]), ([chief], [chief], []))
+        self.assertNotIn(chief, report["missing"])
+        self.assertIn("your renamed Chief of Staff (Maple) is not in the @ agent menu yet", self.hook_line(wb))
+        # through the preview and --expect like any other change: without them, nothing is added
+        self.assertEqual(self.apply(wb, "--raw")["refused"], "no_preview")
+        self.assertFalse((self.menu / chief).exists())
+        applied = self.apply(wb)
+        self.assertIn(chief, applied["applied"]["copied"])
+        self.assertEqual((self.menu / chief).read_bytes(), named)
+        self.assertNotIn(chief, self.placed()["agents"])  # the student's file, never a course copy
+        report = self.report(wb)
+        self.assertEqual((report["renamed_missing"], report["status"]), ([], "in_step"))
+        # an entry already there with other bytes is kept, quietly, as today
+        self.write(self.menu / chief, b"another copy of the chief\n")
+        report = self.report(wb)
+        self.assertEqual((report["renamed"], report["renamed_missing"], report["status"]), ([chief], [], "in_step"))
+        self.apply(wb)
+        self.assertEqual((self.menu / chief).read_bytes(), b"another copy of the chief\n")
+
     def test_a_record_for_another_seat_leaves_a_changed_chief_a_conflict(self):
         # only the files the naming step recorded are the student's renamed seats
         wb = self.workbench("fix")

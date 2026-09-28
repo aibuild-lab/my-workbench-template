@@ -413,7 +413,8 @@ function describe(report) {
 //     name_conflict when it has a course name. The one exception is a seat the student named
 //     (SEAT_NAMES_FILE): exactly the bytes the naming step left is `renamed`, a clean state;
 //     anything else there is `rename_waiting`, one line pointing at the naming step's --reapply.
-//     Neither is ever copied, replaced or recorded, and their menu copies are left alone. Anything else in the user's folders (the student's own agents and skills, aibl-
+//     Neither is ever replaced or recorded, and an existing menu entry is left alone; a renamed
+//     seat with no menu entry at all (a fresh clone) is added, add-only, like a missing agent. Anything else in the user's folders (the student's own agents and skills, aibl-
 //     named or not, in any letter case) is not_ours and never touched. Codex's folders are
 //     never touched.
 //   - A missing name is copied only when nothing sits at that name in any letter case (Mac
@@ -796,12 +797,13 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const renamed = [];
   const renameWaiting = [];
   const renameTitles = {};
+  const renamedBytes = {};
   for (const name of all) {
     const bytes = readBytes(path.join(source, name));
     const named = agents.has(name) && seatNames.get(name);
     if (named && bytes) {
       renameTitles[name] = named.title;
-      (named.sums.has(sha256(bytes)) ? renamed : renameWaiting).push(name);
+      if (named.sums.has(sha256(bytes))) { renamed.push(name); renamedBytes[name] = bytes; } else renameWaiting.push(name);
       continue;
     }
     // the course's only with a course name AND the bytes of a version the course published
@@ -812,6 +814,9 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const byLower = entriesByLowerName(menu);
   const there = agentFiles(menu);
   const missing = [];
+  // A renamed seat with no menu entry at all, in any letter case (a fresh clone on a new computer):
+  // added exactly as the naming step left it, add-only. An entry already there is left alone.
+  const renamedMissing = renamed.filter((name) => byLower.get(name.toLowerCase()) === undefined);
   const caseConflict = [];
   const changed = [];
   const older = []; // the part of changed proven to be an older course version than this workbench's
@@ -872,18 +877,21 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const skills = here.length ? bridgeSkills(root, placed, others)
     : { skills_folder: skillsFolder(), missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
   const linked = linkedClaudeFolders();
-  const empty = !here.length && !leftover.length && !nameConflict.length && !renameWaiting.length;
-  const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length;
+  const empty = !here.length && !leftover.length && !nameConflict.length && !renameWaiting.length && !renamedMissing.length;
+  const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length +
+    renamedMissing.length;
   const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length + nameConflict.length +
     renameWaiting.length;
   let status = empty ? "no_agents" : pending ? "out_of_step" : toAsk ? "needs_a_decision" : "in_step";
   if (linked.length && (pending || toAsk)) status = "linked_folder";
   const report = { status, workbench: root, menu_folder: menu, course_agents_from: catalog.from, missing, changed, older, edited,
-    leftover, not_ours: notOurs, skipped, name_conflict: nameConflict, renamed, rename_waiting: renameWaiting,
+    leftover, not_ours: notOurs, skipped, name_conflict: nameConflict, renamed, renamed_missing: renamedMissing,
+    rename_waiting: renameWaiting,
     rename_titles: renameTitles, other_workbench: otherWorkbench,
     case_conflict: caseConflict, linked_folders: linked, skills, in_step: inStepNames, seen };
   // the bytes of each workbench agent the plan would copy: the apply writes only these exact bytes
-  const sources = Object.fromEntries(here.map((name) => [name, sha256(ourBytes[name])]));
+  const sources = Object.fromEntries([...here.map((name) => [name, sha256(ourBytes[name])]),
+    ...renamedMissing.map((name) => [name, sha256(renamedBytes[name])])]);
   Object.defineProperty(report, "sources", { value: sources, enumerable: false });
   report.preview_sha256 = previewHash(report, root);
   return report;
@@ -898,6 +906,7 @@ function previewHash(report, root) {
     case_conflict: r.case_conflict, other_workbench: r.other_workbench, in_step: r.in_step, seen: r.seen });
   const skillSources = Object.fromEntries(COURSE_SKILLS.map((name) => [name, treeHash(path.join(root, ".claude", "skills", name))]));
   return sha256(Buffer.from(JSON.stringify({ agents: { ...pick(report), name_conflict: report.name_conflict, renamed: report.renamed,
+    renamed_missing: report.renamed_missing,
     rename_waiting: report.rename_waiting, sources: report.sources },
     skills: { ...pick(report.skills), sources: skillSources } })));
 }
@@ -1193,6 +1202,29 @@ function applyLocked(root, replaceEdited, expect) {
       if (temp) dropTemp(temp);
     }
   }
+  // A renamed seat missing from the menu: its exact renamed bytes, as the plan saw them, added the
+  // same add-only way. It is the student's own file, so it is never recorded as a course copy.
+  for (const name of plan.renamed_missing) {
+    const dest = path.join(menu, name);
+    let temp = null;
+    try {
+      const bytes = fs.readFileSync(path.join(source, name));
+      if (sha256(bytes) !== plan.sources[name]) { done.skipped_changed_since_check.push(name); continue; }
+      temp = staged(bytes);
+      try {
+        fs.linkSync(temp, dest);
+      } catch (error) {
+        if (error.code === "EEXIST") { done.skipped_changed_since_check.push(name); continue; }
+        writeAll(dest, bytes);
+      }
+      done.copied.push(name);
+    } catch (error) {
+      if (error.code === "EEXIST") done.skipped_changed_since_check.push(name);
+      else done.errors.push(`${name}: ${error.code || "copy_failed"}`);
+    } finally {
+      if (temp) dropTemp(temp);
+    }
+  }
   for (const name of [...plan.changed, ...plan.edited.filter((n) => approved(n, plan.edited))]) {
     const dest = path.join(menu, name);
     let temp = null;
@@ -1270,6 +1302,9 @@ function describeAgentMenu(menu) {
   const differ = menu.changed.filter((n) => !menu.older.includes(n));
   const skillsDiffer = menu.skills.changed.filter((n) => !menu.skills.older.includes(n));
   if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
+  for (const name of menu.renamed_missing || []) {
+    bits.push(`your renamed ${(menu.rename_titles || {})[name] || name} is not in the @ agent menu yet (${name})`);
+  }
   if (older.length) bits.push(`older course versions in the user folder (this workbench has a newer course version): ${older.join(", ")}`);
   if (differ.length) bits.push(`course copies in the menu that differ from this workbench's: ${differ.join(", ")}`);
   if (menu.leftover.length) bits.push(`left over in the menu from a retired seat: ${menu.leftover.join(", ")}`);
