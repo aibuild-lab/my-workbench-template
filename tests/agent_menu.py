@@ -3,15 +3,18 @@
 Synthetic: a throwaway workbench and a throwaway home folder (HOME / USERPROFILE), so the
 real ~/.claude is never touched. No app, account or installation claim.
 """
-import json, os, subprocess, tempfile, unittest, uuid
+import json, os, subprocess, sys, tempfile, unittest, uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import course_list  # noqa: E402  (the program's list of its agents, built as the course builds it)
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
 # never moved: the terminal Chief aibl-bridge-setup renders (#96), the student's own seat, a second workbench's
 NOT_OURS = ["aibl-chief-of-staff-lead.md", "aibl-my-own-seat.md", "aibl-other-workbench.md"]
-# a course agent (the hook only ever moves names a verified program branch shipped): this
-# fixture's course shipped it in edition one and retired it in edition two
+# a course agent (the hook only ever moves names the program's list records): this fixture's
+# course shipped it in edition one and retired it in edition two
 RETIRED = "aibl-echo.md"
 
 
@@ -52,6 +55,8 @@ class AgentMenu(unittest.TestCase):
         official = "https://github.com/aibuild-lab/agent-workforce.git"
         self.git("remote", "add", "agent-workforce", official)
         self.git("-c", f"url.{course}.insteadOf={official}", "fetch", "-q", "agent-workforce", "student")
+        course_list.adopt(self.wb)                                            # the program's list, as a merge brings it
+        self.commit_all("the course's list of its agents")
         self.menu = self.home / ".claude" / "agents"
         # the hook's own fetch must not reach the network in a test: https is switched off
         self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
@@ -77,6 +82,8 @@ class AgentMenu(unittest.TestCase):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
     def commit_in(self, repo, message):
+        if repo.name == "course":
+            course_list.write(repo)  # every edition carries its list, as the publish step writes it
         self.git_in(repo, "add", "-A")
         self.git_in(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 
@@ -177,12 +184,19 @@ class AgentMenu(unittest.TestCase):
         report = json.loads(self.run_hook("--agent-menu"))
         self.assertEqual((report["status"], report["not_ours"]), ("in_step", NOT_OURS))
 
-    def test_no_program_ref_means_no_leftovers(self):
-        # before the program's branch is fetched, nothing counts as ours to move
+    def test_no_course_list_means_only_the_editions_before_it_count(self):
+        # a workbench whose HEAD has no list is on an edition from before it: only the eight
+        # agents those editions shipped, in their published bytes, are the course's. This
+        # fixture's bytes are none of those, so nothing counts as ours to copy or move. (No
+        # program branch here either: a verified one's list could vouch for more versions.)
         self.git("remote", "remove", "agent-workforce")
+        self.git("rm", "-q", ".aibl/course-agents.json")
+        self.commit_all("an edition from before the list")
         report = json.loads(self.run_hook("--agent-menu"))
-        self.assertEqual(report["leftover"], [])
+        self.assertEqual(report["course_agents_from"], "legacy_edition")
+        self.assertEqual((report["leftover"], report["missing"], report["changed"]), ([], [], []))
         self.assertIn(RETIRED, report["not_ours"])
+        self.assertEqual(report["name_conflict"], ["aibl-chief-of-staff.md", "aibl-the-professor.md"])
 
     def test_no_agents_left_still_cleans_up_leftovers(self):
         # the workbench has no aibl- agents any more: nothing to copy, but its own retired

@@ -1,25 +1,31 @@
-"""The course's agents are found, never listed: whatever the verified program branch shipped.
+"""The course's agents come from the program's own list of them, never from a roster kept here.
 
 The 09-27 pre-publish run (finding F1): the next Agent Workforce edition ships 17 agents, but
 the agent menu copied only the 8 names on a list kept inside update-check.mjs, so the 9 new
 ones came back `skipped` and never reached the @ menu. Tyler's rule (09-24): the team is
-discovery-based, never a hardcoded roster. The course's agents are the aibl-*.md files
-directly in .claude/agents that the verified program branch has shipped at any commit.
+discovery-based, never a hardcoded roster. The program's publish step now writes
+.aibl/course-agents.json into every edition: each agent, current or retired, with the sha256
+of every version the published branch ever had of it. The hook reads that one file from the
+workbench's HEAD. A file is the course's only when its bytes are one of those versions.
 
 Synthetic: a throwaway course, workbench and home folder (HOME / USERPROFILE), so the real
 ~/.claude is never touched. No app, account or installation claim.
 """
-import hashlib, json, os, subprocess, tempfile, unittest, uuid
+import json, os, re, stat, subprocess, sys, tempfile, time, unittest, uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import course_list  # noqa: E402  (the program's list of its agents, built as the course builds it)
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
 OFFICIAL = "https://github.com/aibuild-lab/agent-workforce.git"
+WINDOWS = os.name == "nt"
 
 # the published 09-25 edition (521234a): exactly the eight names the old list held
 OLD_EDITION = ["aibl-charter-steward.md", "aibl-chief-of-staff.md", "aibl-echo.md", "aibl-gigawatt.md",
                "aibl-kansa.md", "aibl-librarian.md", "aibl-the-professor.md", "aibl-ygm.md"]
-# what the next edition adds (#101, #104): on no list anywhere, so only discovery finds them
+# what the next edition adds (#101, #104): on no list anywhere in the template
 NEW_AGENTS = ["aibl-archie.md", "aibl-cinnamon.md", "aibl-cipher.md", "aibl-evidence-pattern-analyst.md",
               "aibl-evy.md", "aibl-hatch.md", "aibl-holler.md", "aibl-sales-discovery.md", "aibl-scratch.md"]
 NEW_EDITION = sorted(OLD_EDITION + NEW_AGENTS)
@@ -35,7 +41,7 @@ def crlf(data):
     return data.replace(b"\n", b"\r\n")
 
 
-class CourseAgentDiscovery(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
@@ -43,12 +49,11 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.menu = self.home / ".claude" / "agents"
         # The course's published student branch: the old 8-agent edition, then the new one
         # (all 17, cipher at v1), then a fix to cipher and the Chief. `old-student` stays on
-        # the old edition, standing in for the published branch before the new edition landed.
+        # the old edition. Every edition carries the program's stamp and its list of agents.
         self.course = self.base / "course"
         cagents = self.course / ".claude" / "agents"
         for name in OLD_EDITION:
             self.write(cagents / name, body(name, "old"))
-        # every published edition carries the program's stamp, never the template's
         self.write(self.course / ".aibl" / "programs" / "agent-workforce.json", b"{}\n")
         self.git(self.course, "init", "-q", "-b", "student")
         self.commit(self.course, "Student edition, old (8 agents)")
@@ -67,6 +72,9 @@ class CourseAgentDiscovery(unittest.TestCase):
                         GIT_TERMINAL_PROMPT="0")
 
     def tearDown(self):
+        for p in self.base.rglob("*"):  # a test may leave a folder read-only
+            if p.is_dir() and not p.is_symlink():
+                os.chmod(p, stat.S_IRWXU)
         self.temp.cleanup()
 
     @staticmethod
@@ -75,25 +83,14 @@ class CourseAgentDiscovery(unittest.TestCase):
         path.write_bytes(data)
 
     def git(self, repo, *args):
-        subprocess.run(["git", "-C", str(repo), "-c", "core.autocrlf=false", *args], check=True, capture_output=True)
+        return subprocess.run(["git", "-C", str(repo), "-c", "core.autocrlf=false", *args], check=True,
+                              capture_output=True).stdout
 
     def commit(self, repo, message):
         if repo == self.course:
-            self.write_manifest(repo)
+            course_list.write(repo)  # every edition carries its list, as the publish step writes it
         self.git(repo, "add", "-A")
         self.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
-
-    def write_manifest(self, repo, repository="aibuild-lab/agent-workforce"):
-        # the program's edition manifest, as the real student edition ships it: every file with
-        # the sha256 of its bytes
-        files = []
-        for f in sorted((repo / ".claude" / "agents").rglob("*")):
-            if f.is_file():
-                rel = f.relative_to(repo).as_posix()
-                files.append({"path": rel, "sha256": hashlib.sha256(f.read_bytes()).hexdigest(),
-                              "workbench_path": rel, "status": "populated"})
-        self.write(repo / ".aibl" / "workforce-student-edition.json", json.dumps(
-            {"schema_version": "aibl.student-edition/v1", "repository": repository, "files": files}, indent=2).encode())
 
     def fetch(self, wb, branch="student"):
         # the remote's effective URL stays official (what the hook verifies); this one fetch
@@ -101,9 +98,10 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.git(wb, "-c", f"url.{self.course}.insteadOf={OFFICIAL}", "fetch", "-q", "agent-workforce",
                  f"+{branch}:refs/remotes/agent-workforce/student")
 
-    def workbench(self, edition, ref="student"):
-        """A student's workbench on the course's `old` or `fix` edition, plus the student's own agents."""
-        wb = self.base / f"workbench-{edition}-{ref}"
+    def workbench(self, edition, ref="student", with_list=True):
+        """A student's workbench on the course's `old` or `fix` edition (its files and its list, as a
+        merge brings them), plus the student's own agents. The program branch is fetched at ref."""
+        wb = self.base / f"workbench-{edition}-{ref}-{with_list}"
         agents = wb / ".claude" / "agents"
         self.write(wb / ".aibl" / "template.json", b"{}\n")
         if edition == "old":
@@ -115,12 +113,16 @@ class CourseAgentDiscovery(unittest.TestCase):
                                                 "new" if name in NEW_AGENTS else "old"))
             for rel, data in NOT_AGENTS.items():
                 self.write(agents / rel, data)
+        if with_list:
+            self.write(wb / course_list.LIST, self.git(self.course, "show",
+                                                       ("old-student" if edition == "old" else "student") + ":" + course_list.LIST))
         self.write(agents / "aibl-my-own.md", b"an aibl- agent the student made\n")
         self.write(agents / "my-helper.md", b"the student's own, not aibl-\n")
         self.git(wb, "init", "-q", "-b", "main")
         self.commit(wb, "workbench")
-        self.git(wb, "remote", "add", "agent-workforce", OFFICIAL)
-        self.fetch(wb, ref)
+        if ref:
+            self.git(wb, "remote", "add", "agent-workforce", OFFICIAL)
+            self.fetch(wb, ref)
         return wb
 
     def run_hook(self, wb, *args, stdin=""):
@@ -143,20 +145,41 @@ class CourseAgentDiscovery(unittest.TestCase):
     def menu_names(self):
         return sorted(p.name for p in self.menu.iterdir()) if self.menu.exists() else []
 
-    def test_a_new_edition_offers_and_applies_every_shipped_agent(self):
+    def placed(self):
+        f = self.home / ".claude" / "aibl-agent-menu-placed.json"
+        return json.loads(f.read_text()) if f.exists() else {"agents": {}}
+
+
+class TheProgramsList(Fixture):
+    def test_the_list_holds_current_and_retired_agents_with_every_version(self):
+        # what the course's publish step writes (tests/course_list.py builds it the same way)
+        self.write(self.course / ".claude" / "agents" / "aibl-scratch.md", b"")
+        (self.course / ".claude" / "agents" / "aibl-scratch.md").unlink()
+        self.commit(self.course, "Student edition, retires scratch")
+        listed = json.loads(self.git(self.course, "show", "student:" + course_list.LIST))
+        self.assertEqual(listed["version"], 1)
+        self.assertEqual(sorted(listed["agents"]), NEW_EDITION)
+        self.assertEqual(listed["agents"]["aibl-scratch.md"]["status"], "retired")
+        self.assertEqual(listed["agents"]["aibl-hatch.md"]["status"], "current")
+        cipher = listed["agents"]["aibl-cipher.md"]
+        self.assertEqual(len(cipher["published_sha256"]), 4)  # two versions, each as LF and as CRLF
+        self.assertNotIn("helper.md", listed["agents"])
+        self.assertNotIn("aibl-draft.md", listed["agents"])
+
+    def test_a_new_edition_offers_and_applies_every_listed_agent(self):
         wb = self.workbench("fix")
         report = self.report(wb)
-        self.assertEqual(report["status"], "out_of_step")
+        self.assertEqual((report["status"], report["course_agents_from"]), ("out_of_step", "program"))
         self.assertEqual(report["missing"], NEW_EDITION)
         self.assertEqual(report["skipped"], ["aibl-my-own.md"])
         line = self.hook_line(wb)
         for name in NEW_AGENTS:
             self.assertIn(name, line)
-        applied = self.apply(wb)
+        applied = self.apply(wb, "--expect", report["preview_sha256"])
         self.assertEqual(applied["applied"]["errors"], [])
         self.assertEqual(applied["applied"]["copied"], NEW_EDITION)
         self.assertEqual(applied["status"], "in_step")
-        self.assertEqual(self.menu_names(), NEW_EDITION)
+        self.assertEqual(self.menu_names(), NEW_EDITION)  # and no temp file left behind
         for name in NEW_EDITION:
             self.assertEqual((self.menu / name).read_bytes(), (wb / ".claude" / "agents" / name).read_bytes())
         self.assertNotIn("agent menu", self.hook_line(wb))
@@ -173,208 +196,77 @@ class CourseAgentDiscovery(unittest.TestCase):
                 report = self.report(wb)
                 self.assertEqual((report["status"], report["missing"], report["skipped"]),
                                  ("out_of_step", OLD_EDITION, ["aibl-my-own.md"]))
-                self.assertEqual((report["changed"], report["edited"], report["leftover"], report["not_ours"]),
-                                 ([], [], [], []))
+                self.assertEqual((report["changed"], report["edited"], report["leftover"], report["not_ours"],
+                                  report["name_conflict"]), ([], [], [], [], []))
                 applied = self.apply(wb)
                 self.assertEqual((applied["applied"]["errors"], applied["applied"]["copied"]), ([], OLD_EDITION))
                 self.assertEqual(applied["status"], "in_step")
                 self.assertEqual(self.menu_names(), OLD_EDITION)
                 self.assertNotIn("agent menu", self.hook_line(wb))
 
-    def test_a_student_edited_agent_is_never_overwritten(self):
-        wb = self.workbench("fix")
-        hatch = self.menu / "aibl-hatch.md"
-        edits = body("aibl-hatch.md", "new") + b"my own line\n"
-        self.write(hatch, edits)
-        # the Windows rule (#15), for an agent on no list: an older course version with CRLF
-        # line endings is the course's, offered as an update, not the student's edits
-        self.write(self.menu / "aibl-cipher.md", crlf(body("aibl-cipher.md", "new")))
-        report = self.report(wb)
-        self.assertEqual((report["edited"], report["changed"], report["older"]),
-                         (["aibl-hatch.md"], ["aibl-cipher.md"], ["aibl-cipher.md"]))
-        applied = self.apply(wb)
-        self.assertEqual(hatch.read_bytes(), edits)
-        self.assertEqual(applied["applied"]["replaced"], ["aibl-cipher.md"])
-        self.assertEqual((self.menu / "aibl-cipher.md").read_bytes(), body("aibl-cipher.md", "fix"))
-        self.assertEqual(applied["status"], "needs_a_decision")
-        # only the student's own yes for that copy replaces it, and the old one goes to a backup
-        applied = self.apply(wb, "--replace-edited", "aibl-hatch.md")
-        self.assertEqual(hatch.read_bytes(), body("aibl-hatch.md", "new"))
-        self.assertEqual((Path(applied["applied"]["removed_to"]) / "replaced" / "aibl-hatch.md").read_bytes(), edits)
-
-    def test_the_students_own_agents_are_untouched(self):
-        wb = self.workbench("fix")
-        mine = {"aibl-my-own.md": b"my own, a different copy\n", "my-agent.md": b"mine\n",
-                "aibl-someone-else.md": b"never shipped by the course\n"}
-        for name, data in mine.items():
-            self.write(self.menu / name, data)
-        report = self.report(wb)
-        self.assertEqual(report["skipped"], ["aibl-my-own.md"])
-        self.assertEqual(report["not_ours"], ["aibl-my-own.md", "aibl-someone-else.md"])
-        self.assertNotIn("aibl-my-own.md", report["missing"] + report["changed"] + report["edited"])
-        self.apply(wb)
-        for name, data in mine.items():
-            self.assertEqual((self.menu / name).read_bytes(), data)
-        self.assertEqual(self.menu_names(), sorted(NEW_EDITION + list(mine)))
-
-    def test_a_file_that_is_not_an_aibl_agent_is_never_picked_up(self):
-        # the course ships helper.md and drafts/aibl-draft.md in .claude/agents; the student has
-        # an aibl-draft.md of their own at the top. None of them is a course agent.
-        wb = self.workbench("fix")
-        self.write(wb / ".claude" / "agents" / "aibl-draft.md", b"the student's own draft seat\n")
-        self.commit(wb, "my draft seat")
-        report = self.report(wb)
-        self.assertEqual(report["skipped"], ["aibl-draft.md", "aibl-my-own.md"])
-        listed = json.dumps(report)
-        self.assertNotIn("helper.md", listed)
-        self.assertNotIn("my-helper.md", listed)
-        self.apply(wb)
-        self.assertEqual(self.menu_names(), NEW_EDITION)
-        self.assertFalse((self.menu / "drafts").exists())
-
-    def test_an_agent_a_course_update_removes_moves_only_this_workbenchs_own_copy(self):
-        # Behavior kept from before: a retired course agent is moved (never deleted) to a dated
-        # backup only when this workbench placed exactly those bytes and no longer has the file;
-        # a copy edited since is left where it is.
-        wb = self.workbench("fix")
-        self.apply(wb)
-        for name in ("aibl-scratch.md", "aibl-holler.md"):
-            (self.course / ".claude" / "agents" / name).unlink()
-            (wb / ".claude" / "agents" / name).unlink()
-        self.commit(self.course, "Student edition, retires two seats")
-        self.commit(wb, "took the edition that retires two seats")
-        self.fetch(wb)
-        self.write(self.menu / "aibl-holler.md", b"the student edited this copy\n")
-        report = self.report(wb)
-        self.assertEqual(report["leftover"], ["aibl-scratch.md"])
-        self.assertEqual(report["not_ours"], ["aibl-holler.md"])
-        applied = self.apply(wb)
-        self.assertEqual(applied["applied"]["removed"], ["aibl-scratch.md"])
-        self.assertEqual((Path(applied["applied"]["removed_to"]) / "aibl-scratch.md").read_bytes(),
-                         body("aibl-scratch.md", "new"))
-        self.assertFalse((self.menu / "aibl-scratch.md").exists())
-        self.assertEqual((self.menu / "aibl-holler.md").read_bytes(), b"the student edited this copy\n")
-
-    def test_no_verified_program_means_no_course_agents(self):
-        # a remote merely named like the program proves nothing, and this workbench never merged
-        # the program: nothing is the course's to copy
-        wb = self.workbench("fix")
-        self.git(wb, "remote", "set-url", "agent-workforce", str(self.course))
-        report = self.report(wb)
-        self.assertEqual((report["status"], report["missing"]), ("no_agents", []))
-        self.assertEqual(report["skipped"], sorted(NEW_EDITION + ["aibl-my-own.md"]))
-        self.apply(wb)
-        self.assertEqual(self.menu_names(), [])
-        self.assertEqual(self.hook_line(wb), "")
-
-
-    # --- a fresh clone on a new computer: no program remote-tracking ref, perhaps offline ---
-
-    def enrolled_origin(self, branch):
-        """A workbench that enrolled (merged the program as aibl-enroll does), pushed to the
-        student's own repository. Returns that repository."""
-        wb = self.base / f"enrolled-{branch}"
+    def test_a_fresh_or_shallow_clone_offline_needs_nothing_but_its_head(self):
+        # enrolled the way aibl-enroll does it, pushed, then cloned fresh on a new computer:
+        # only `origin`, no program ref, and https off, so any fetch fails as it would offline
+        wb = self.base / "enrolled"
         self.write(wb / ".aibl" / "template.json", b"{}\n")
         self.write(wb / ".claude" / "agents" / "aibl-my-own.md", b"an aibl- agent the student made\n")
         self.git(wb, "init", "-q", "-b", "main")
         self.commit(wb, "workbench")
         self.git(wb, "remote", "add", "agent-workforce", OFFICIAL)
-        self.fetch(wb, branch)
+        self.fetch(wb)
         self.git(wb, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "-q",
                  "--allow-unrelated-histories", "--no-ff", "-m", "Add Agent Workforce", "agent-workforce/student")
-        origin = self.base / f"origin-{branch}.git"
+        origin = self.base / "origin.git"
         subprocess.run(["git", "clone", "-q", "--bare", str(wb), str(origin)], check=True, capture_output=True)
-        return origin
-
-    def fresh_clone(self, origin, name, readd_remote):
-        """Cloned fresh: only `origin`, no program ref. Git's https is switched off in these
-        tests, so any fetch of the official remote fails exactly as it would offline."""
-        fresh = self.base / name
-        subprocess.run(["git", "clone", "-q", str(origin), str(fresh)], check=True, capture_output=True)
-        if readd_remote:
-            self.git(fresh, "remote", "add", "agent-workforce", OFFICIAL)  # re-added, never fetched
-        refs = subprocess.run(["git", "-C", str(fresh), "for-each-ref", "refs/remotes/agent-workforce"],
-                              text=True, capture_output=True, check=True).stdout
-        self.assertEqual(refs, "")
-        return fresh
-
-    def test_a_fresh_clone_offline_still_offers_the_agents_it_merged(self):
-        origin = self.enrolled_origin("student")
-        for readd in (False, True):
-            with self.subTest(program_remote_readded=readd):
+        for depth in (None, "1"):
+            with self.subTest(depth=depth):
                 if self.menu.exists():
                     for p in self.menu.iterdir():
                         p.unlink()
-                fresh = self.fresh_clone(origin, f"fresh-{readd}", readd)
+                fresh = self.base / f"fresh-{depth}"
+                extra = ["--depth", depth] if depth else []
+                subprocess.run(["git", "clone", "-q", *extra, origin.as_uri(), str(fresh)], check=True, capture_output=True)
+                self.git(fresh, "remote", "add", "agent-workforce", OFFICIAL)  # re-added, never fetched
                 report = self.report(fresh)
                 self.assertEqual((report["status"], report["missing"]), ("out_of_step", NEW_EDITION))
-                self.assertEqual(report["skipped"], ["aibl-my-own.md"])
-                # the session-start hook: its fetch fails (offline), yet it exits 0 and speaks
-                self.assertIn("aibl-hatch.md", self.hook_line(fresh))
+                self.assertIn("aibl-hatch.md", self.hook_line(fresh))  # its fetch fails; it still speaks
                 applied = self.apply(fresh)
                 self.assertEqual((applied["applied"]["errors"], applied["applied"]["copied"]), ([], NEW_EDITION))
-                self.assertEqual(applied["status"], "in_step")
-                self.assertEqual(self.menu_names(), NEW_EDITION)
 
-    def test_a_fresh_clone_of_an_old_edition_offers_its_eight(self):
-        fresh = self.fresh_clone(self.enrolled_origin("old-student"), "fresh-old", False)
-        report = self.report(fresh)
-        self.assertEqual((report["status"], report["missing"], report["skipped"]),
-                         ("out_of_step", OLD_EDITION, ["aibl-my-own.md"]))
-        applied = self.apply(fresh)
-        self.assertEqual(applied["applied"]["copied"], OLD_EDITION)
-        self.assertEqual(self.menu_names(), OLD_EDITION)
+    def test_a_list_that_does_not_read_names_no_agents(self):
+        wb = self.workbench("fix", ref=None)
+        (wb / course_list.LIST).write_text('{"version": 1, "agents": {"aibl-hatch.md": {"status": "sometimes"}}}\n')
+        self.commit(wb, "a broken list")
+        report = self.report(wb)
+        self.assertEqual((report["status"], report["course_agents_from"], report["missing"]), ("no_agents", "unreadable", []))
+        self.apply(wb)
+        self.assertEqual(self.menu_names(), [])
 
-    def test_a_shallow_fresh_clone_finds_its_course_in_the_edition_manifest(self):
-        # a depth-1 clone holds no program commit at all, only the merged tree; the program's own
-        # edition manifest in it still names each agent and the sha256 of its bytes
-        origin = self.enrolled_origin("student")
-        fresh = self.base / "fresh-shallow"
-        subprocess.run(["git", "clone", "-q", "--depth", "1", origin.as_uri(), str(fresh)], check=True, capture_output=True)
-        shallow = subprocess.run(["git", "-C", str(fresh), "rev-parse", "--is-shallow-repository"],
-                                 text=True, capture_output=True, check=True).stdout.strip()
-        self.assertEqual(shallow, "true")
-        report = self.report(fresh)
-        self.assertEqual((report["status"], report["missing"], report["skipped"]),
-                         ("out_of_step", NEW_EDITION, ["aibl-my-own.md"]))
-        applied = self.apply(fresh)
-        self.assertEqual((applied["applied"]["errors"], applied["applied"]["copied"]), ([], NEW_EDITION))
-        # an edited agent in the shallow clone is still the student's
-        self.write(fresh / ".claude" / "agents" / "aibl-hatch.md", b"changed here\n")
-        self.commit(fresh, "my hatch")
-        self.assertEqual(self.report(fresh)["name_conflict"], ["aibl-hatch.md"])
+    def test_the_timing_does_not_depend_on_the_history(self):
+        # one file read from HEAD: a workbench with 5,000 commits takes no longer than one with 1
+        wb = self.workbench("fix", ref=None)
+        start = time.monotonic()
+        self.report(wb)
+        small = time.monotonic() - start
+        stream = []
+        for i in range(5000):
+            stream.append(f"commit refs/heads/main\ncommitter t <t@example.invalid> {1700000000 + i} +0000\n"
+                          f"data 6\nnote {i % 10}\n" + ("from refs/heads/main^0\n" if i == 0 else "") +
+                          f"M 100644 inline work/note.txt\ndata {len(str(i)) + 1}\n{i}\n")
+        subprocess.run(["git", "-C", str(wb), "fast-import", "--quiet"], input="".join(stream).encode(),
+                       check=True, capture_output=True)
+        self.git(wb, "reset", "-q", "--hard", "main")
+        count = int(self.git(wb, "rev-list", "--count", "HEAD").decode())
+        self.assertGreater(count, 5000)
+        start = time.monotonic()
+        report = self.report(wb)
+        big = time.monotonic() - start
+        self.assertEqual(report["missing"], NEW_EDITION)
+        print(f"\n  --agent-menu: {small:.2f}s at 1 commit, {big:.2f}s at {count} commits", file=sys.stderr)
+        self.assertLess(big, max(5.0, small * 3))
 
-    def test_an_edited_manifest_never_outranks_the_programs_history(self):
-        # a full clone: the student changes aibl-hatch and writes its hash into the manifest too;
-        # the program commits in history say otherwise, so the file is still the student's
-        fresh = self.fresh_clone(self.enrolled_origin("student"), "fresh-edited-manifest", False)
-        hatch = fresh / ".claude" / "agents" / "aibl-hatch.md"
-        self.write(hatch, b"my own hatch\n")
-        manifest = fresh / ".aibl" / "workforce-student-edition.json"
-        data = json.loads(manifest.read_text())
-        for f in data["files"]:
-            if f["path"] == ".claude/agents/aibl-hatch.md":
-                f["sha256"] = hashlib.sha256(b"my own hatch\n").hexdigest()
-        manifest.write_text(json.dumps(data))
-        self.commit(fresh, "my hatch, and the manifest edited to match")
-        report = self.report(fresh)
-        self.assertEqual(report["name_conflict"], ["aibl-hatch.md"])
-        self.apply(fresh)
-        self.assertFalse((self.menu / "aibl-hatch.md").exists())
 
-    def test_a_manifest_from_anywhere_else_proves_nothing(self):
-        wb = self.workbench("fix")
-        self.write_manifest(wb, repository="someone-else/agent-workforce")
-        self.commit(wb, "a manifest that is not the program's")
-        self.git(wb, "remote", "remove", "agent-workforce")
-        self.assertEqual(self.report(wb)["status"], "no_agents")
-
-    # --- a name alone proves nothing: a course name with bytes the course never published ---
-
-    def placed(self):
-        f = self.home / ".claude" / "aibl-agent-menu-placed.json"
-        return json.loads(f.read_text()) if f.exists() else {"agents": {}}
-
+class NameConflicts(Fixture):
     def test_a_personal_menu_agent_with_a_newly_shipped_course_name_is_never_replaced(self):
         # an older-edition student made ~/.claude/agents/aibl-hatch.md; the course now ships aibl-hatch
         mine = b"my own hatch, made before the course had one\n"
@@ -387,14 +279,12 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
         self.assertNotIn("aibl-hatch.md", applied["applied"]["claimed"] + applied["applied"]["copied"])
         self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
-        # and it stays the student's on every later run
         self.apply(wb)
         self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
 
     def test_a_workbench_agent_with_a_course_name_but_not_course_bytes_is_the_students(self):
-        # an old-edition workbench has the student's own aibl-hatch.md; the fetched edition ships one
         mine = b"my own hatch, in my workbench\n"
-        wb = self.workbench("old")
+        wb = self.workbench("fix")
         self.write(wb / ".claude" / "agents" / "aibl-hatch.md", mine)
         self.commit(wb, "my own hatch")
         report = self.report(wb)
@@ -403,7 +293,7 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.assertNotIn("aibl-hatch.md", report["missing"])
         self.assertIn("name conflicts", self.hook_line(wb))
         applied = self.apply(wb)
-        self.assertEqual(applied["applied"]["copied"], OLD_EDITION)
+        self.assertNotIn("aibl-hatch.md", applied["applied"]["copied"])
         self.assertFalse((self.menu / "aibl-hatch.md").exists())
         self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
         # the student put their own copy in the menu themselves: settled, and never claimed
@@ -412,14 +302,156 @@ class CourseAgentDiscovery(unittest.TestCase):
         self.assertEqual((report["name_conflict"], report["status"]), ([], "in_step"))
         self.apply(wb)
         self.assertNotIn("aibl-hatch.md", self.placed()["agents"])
-        # later the workbench takes the course's aibl-hatch: the menu copy is still theirs, never
-        # replaced without their own yes
+        # later the workbench takes the course's aibl-hatch: the menu copy is still theirs
         self.write(wb / ".claude" / "agents" / "aibl-hatch.md", body("aibl-hatch.md", "new"))
         self.commit(wb, "took the course's hatch")
         report = self.report(wb)
         self.assertEqual((report["edited"], report["changed"], report["name_conflict"]), (["aibl-hatch.md"], [], []))
         self.apply(wb)
         self.assertEqual((self.menu / "aibl-hatch.md").read_bytes(), mine)
+
+    def test_the_students_own_agents_are_untouched(self):
+        wb = self.workbench("fix")
+        mine = {"aibl-my-own.md": b"my own, a different copy\n", "my-agent.md": b"mine\n",
+                "aibl-someone-else.md": b"never shipped by the course\n"}
+        for name, data in mine.items():
+            self.write(self.menu / name, data)
+        report = self.report(wb)
+        self.assertEqual(report["skipped"], ["aibl-my-own.md"])
+        self.assertEqual(report["not_ours"], ["aibl-my-own.md", "aibl-someone-else.md"])
+        self.apply(wb)
+        for name, data in mine.items():
+            self.assertEqual((self.menu / name).read_bytes(), data)
+        self.assertEqual(self.menu_names(), sorted(NEW_EDITION + list(mine)))
+
+    def test_a_file_that_is_not_a_listed_aibl_agent_is_never_picked_up(self):
+        # the course ships helper.md and drafts/aibl-draft.md in .claude/agents; the student has an
+        # aibl-draft.md of their own at the top. None of them is on the list.
+        wb = self.workbench("fix")
+        self.write(wb / ".claude" / "agents" / "aibl-draft.md", b"the student's own draft seat\n")
+        self.commit(wb, "my draft seat")
+        report = self.report(wb)
+        self.assertEqual((report["skipped"], report["name_conflict"]), (["aibl-draft.md", "aibl-my-own.md"], []))
+        self.assertNotIn("helper.md", json.dumps(report))
+        self.apply(wb)
+        self.assertEqual(self.menu_names(), NEW_EDITION)
+
+
+class Edits(Fixture):
+    def test_a_student_edited_agent_is_never_overwritten(self):
+        wb = self.workbench("fix")
+        hatch = self.menu / "aibl-hatch.md"
+        edits = body("aibl-hatch.md", "new") + b"my own line\n"
+        self.write(hatch, edits)
+        # the Windows rule (#15), for a new agent: an older course version with CRLF line
+        # endings is the course's, offered as an update, not the student's edits
+        self.write(self.menu / "aibl-cipher.md", crlf(body("aibl-cipher.md", "new")))
+        report = self.report(wb)
+        self.assertEqual((report["edited"], report["changed"], report["older"]),
+                         (["aibl-hatch.md"], ["aibl-cipher.md"], ["aibl-cipher.md"]))
+        applied = self.apply(wb)
+        self.assertEqual(hatch.read_bytes(), edits)
+        self.assertEqual(applied["applied"]["replaced"], ["aibl-cipher.md"])
+        self.assertEqual((self.menu / "aibl-cipher.md").read_bytes(), body("aibl-cipher.md", "fix"))
+        backup = Path(applied["applied"]["removed_to"])
+        self.assertEqual((backup / "replaced" / "aibl-cipher.md").read_bytes(), crlf(body("aibl-cipher.md", "new")))
+        self.assertEqual(applied["status"], "needs_a_decision")
+        applied = self.apply(wb, "--replace-edited", "aibl-hatch.md")
+        self.assertEqual(hatch.read_bytes(), body("aibl-hatch.md", "new"))
+        self.assertEqual((Path(applied["applied"]["removed_to"]) / "replaced" / "aibl-hatch.md").read_bytes(), edits)
+
+    def test_a_retired_agent_is_removed_only_when_this_workbench_placed_it(self):
+        # a course update retires two seats; the copy this workbench placed is kept in the backup
+        # and removed from the menu, the one the student edited since stays exactly as it is
+        wb = self.workbench("fix")
+        self.apply(wb)
+        for name in ("aibl-scratch.md", "aibl-holler.md"):
+            (self.course / ".claude" / "agents" / name).unlink()
+            (wb / ".claude" / "agents" / name).unlink()
+        self.commit(self.course, "Student edition, retires two seats")
+        self.fetch(wb)
+        course_list.adopt(wb)
+        self.commit(wb, "took the edition that retires two seats")
+        self.write(self.menu / "aibl-holler.md", b"the student edited this copy\n")
+        report = self.report(wb)
+        self.assertEqual((report["leftover"], report["not_ours"]), (["aibl-scratch.md"], ["aibl-holler.md"]))
+        applied = self.apply(wb, "--expect", report["preview_sha256"])
+        self.assertEqual(applied["applied"]["removed"], ["aibl-scratch.md"])
+        self.assertEqual((Path(applied["applied"]["removed_to"]) / "aibl-scratch.md").read_bytes(),
+                         body("aibl-scratch.md", "new"))
+        self.assertFalse((self.menu / "aibl-scratch.md").exists())
+        self.assertEqual((self.menu / "aibl-holler.md").read_bytes(), b"the student edited this copy\n")
+
+    def test_anything_changed_after_the_preview_is_refused(self):
+        wb = self.workbench("fix")
+        self.write(self.menu / "aibl-cipher.md", body("aibl-cipher.md", "new"))
+        report = self.report(wb)
+        self.assertEqual(report["changed"], ["aibl-cipher.md"])
+        # after the preview the student edits that copy: the yes was for what the preview showed
+        self.write(self.menu / "aibl-cipher.md", b"edited after the preview\n")
+        applied = self.apply(wb, "--expect", report["preview_sha256"])
+        self.assertEqual((applied["refused"], applied["applied"]), ("changed_since_preview", None))
+        self.assertEqual((self.menu / "aibl-cipher.md").read_bytes(), b"edited after the preview\n")
+        self.assertEqual(self.menu_names(), ["aibl-cipher.md"])
+
+    @unittest.skipIf(WINDOWS or (hasattr(os, "geteuid") and os.geteuid() == 0), "needs a folder this user cannot write")
+    def test_a_failed_write_leaves_every_entry_as_it_was(self):
+        wb = self.workbench("fix")
+        older = body("aibl-cipher.md", "new")
+        self.write(self.menu / "aibl-cipher.md", older)
+        before = {p.name: p.read_bytes() for p in self.menu.iterdir()}
+        os.chmod(self.menu, 0o555)  # the temp file cannot be written
+        try:
+            applied = self.apply(wb)
+        finally:
+            os.chmod(self.menu, 0o755)
+        self.assertTrue(any(e.startswith("aibl-cipher.md:") for e in applied["applied"]["errors"]))
+        self.assertEqual(applied["applied"]["replaced"], [])
+        self.assertEqual({p.name: p.read_bytes() for p in self.menu.iterdir()}, before)  # intact, no temp left
+
+
+class TheEditionsBeforeTheList(Fixture):
+    def test_the_fallback_is_the_eight_agents_of_the_old_list(self):
+        source = HOOK.read_text()
+        table = source[source.index("const LEGACY_EDITION = {"):source.index("};", source.index("const LEGACY_EDITION = {"))]
+        self.assertEqual(sorted(re.findall(r'"(aibl-[a-z0-9-]+\.md)": \{', table)), OLD_EDITION)
+
+    def test_without_a_list_only_those_editions_published_bytes_count(self):
+        # HEAD has no list and no program branch is here: only the eight names, and only in the
+        # bytes the published editions had. These synthetic files are none of those.
+        wb = self.workbench("fix", ref=None, with_list=False)
+        report = self.report(wb)
+        self.assertEqual(report["course_agents_from"], "legacy_edition")
+        self.assertEqual((report["missing"], report["changed"], report["leftover"]), ([], [], []))
+        self.assertEqual(report["name_conflict"], OLD_EDITION)
+        self.assertEqual(report["skipped"], sorted(NEW_EDITION + ["aibl-my-own.md"]))
+        self.apply(wb)
+        self.assertEqual(self.menu_names(), [])
+
+    @unittest.skipUnless(os.environ.get("AIBL_PUBLISHED_521234A"),
+                         "set AIBL_PUBLISHED_521234A to a checkout of aibuild-lab/agent-workforce at 521234a")
+    def test_the_published_521234a_behaves_as_today(self):
+        # A real 09-25 workbench: the published edition's own agent files, no list in HEAD.
+        published = Path(os.environ["AIBL_PUBLISHED_521234A"]) / ".claude" / "agents"
+        wb = self.base / "real-521234a"
+        self.write(wb / ".aibl" / "template.json", b"{}\n")
+        for f in sorted(published.iterdir()):
+            self.write(wb / ".claude" / "agents" / f.name, f.read_bytes())
+        self.git(wb, "init", "-q", "-b", "main")
+        self.commit(wb, "a 09-25 workbench")
+        for form in ("as published", "as a Windows checkout"):
+            with self.subTest(form=form):
+                if form != "as published":
+                    for f in (wb / ".claude" / "agents").iterdir():
+                        f.write_bytes(crlf(f.read_bytes().replace(b"\r\n", b"\n")))
+                if self.menu.exists():
+                    for p in self.menu.iterdir():
+                        p.unlink()
+                report = self.report(wb)
+                self.assertEqual((report["course_agents_from"], report["missing"], report["skipped"], report["name_conflict"]),
+                                 ("legacy_edition", OLD_EDITION, [], []))
+                applied = self.apply(wb)
+                self.assertEqual((applied["applied"]["copied"], applied["status"]), (OLD_EDITION, "in_step"))
 
 
 if __name__ == "__main__":

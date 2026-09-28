@@ -10,8 +10,11 @@ Synthetic: a throwaway course, workbench and home folder (HOME / USERPROFILE), s
 ~/.claude is never touched. Every file is written as exact bytes, so the test means the same
 on a Mac and on Windows. No app, account or installation claim.
 """
-import json, os, subprocess, tempfile, unittest, uuid
+import json, os, subprocess, sys, tempfile, unittest, uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import course_list  # noqa: E402  (the program's list of its agents, built as the course builds it)
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
@@ -57,6 +60,8 @@ class OlderCourseCopies(unittest.TestCase):
         self.commit(self.wb, "workbench")
         self.git(self.wb, "remote", "add", "agent-workforce", OFFICIAL)
         self.fetch()
+        course_list.adopt(self.wb)  # the program's list of its agents, as the merge brought it
+        self.commit(self.wb, "the course's list of its agents")
         self.menu = self.home / ".claude" / "agents"
         self.menu.mkdir(parents=True)
         self.write(self.menu / PROFESSOR, crlf(PROF))
@@ -78,6 +83,8 @@ class OlderCourseCopies(unittest.TestCase):
         subprocess.run(["git", "-C", str(repo), "-c", "core.autocrlf=false", *args], check=True, capture_output=True)
 
     def commit(self, repo, message):
+        if repo == self.course:
+            course_list.write(repo)  # every edition carries its list, as the publish step writes it
         self.git(repo, "add", "-A")
         self.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 

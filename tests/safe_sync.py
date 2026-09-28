@@ -8,8 +8,11 @@ not, and never other course components.
 Synthetic: a throwaway workbench and a throwaway home folder (HOME / USERPROFILE), so the
 real ~/.claude, ~/.codex and ~/.aibl are never touched. No app, account or installation claim.
 """
-import json, os, stat, subprocess, tempfile, unittest, uuid
+import json, os, stat, subprocess, sys, tempfile, unittest, uuid
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import course_list  # noqa: E402  (the program's list of its agents, built as the course builds it)
 
 ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
@@ -75,6 +78,7 @@ class Fixture(unittest.TestCase):
         self.course = course
         self.git(self.wb, "remote", "add", "agent-workforce", OFFICIAL)
         self.fetch(self.wb)
+        self.take_list(self.wb)
         # the hook's own fetch must not reach the network in a test: https is switched off
         self.env = dict(os.environ, HOME=str(self.home), USERPROFILE=str(self.home),
                         CLAUDE_PROJECT_DIR=str(self.wb), GIT_CONFIG_COUNT="1",
@@ -129,7 +133,14 @@ class Fixture(unittest.TestCase):
         # reads the local fixture instead
         self.git(wb, "-c", f"url.{self.course}.insteadOf={OFFICIAL}", "fetch", "-q", "agent-workforce", "student")
 
+    def take_list(self, wb):
+        # the program's list of its agents arrives with the edition, as a merge brings it
+        course_list.adopt(wb)
+        self.commit(wb, "the course's list of its agents")
+
     def commit(self, repo, message):
+        if repo == getattr(self, "course", None) or repo.name == "course":
+            course_list.write(repo)  # every edition carries its list, as the publish step writes it
         self.git(repo, "add", "-A")
         self.git(repo, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", message)
 
@@ -145,6 +156,7 @@ class Fixture(unittest.TestCase):
             f.write_text(before)
         self.commit(self.course, "edition after it")
         self.fetch(self.wb)
+        self.take_list(self.wb)
 
     def run_hook(self, *args, stdin=""):
         p = subprocess.run(["node", str(HOOK), *args], input=stdin, text=True, capture_output=True,
@@ -357,6 +369,7 @@ class LeftoverNeedsEvidence(Fixture):
         # verified branch shipped, so a workbench with no program has none to place
         self.git(other, "remote", "add", "agent-workforce", OFFICIAL)
         self.fetch(other)
+        self.take_list(other)
         return other
 
     def run_in(self, wb, *args):
@@ -418,11 +431,17 @@ class LeftoverNeedsEvidence(Fixture):
         self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
 
     def test_a_remote_only_named_like_the_program_proves_nothing(self):
+        # a branch fetched from a remote that is merely named like the program: its list vouches
+        # for nothing, so a copy of a version only it has is not the course's
+        (self.course / ".claude" / "agents" / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.commit(self.course, "edition three")
         self.git(self.wb, "remote", "set-url", "agent-workforce", str(self.course))
+        self.git(self.wb, "fetch", "-q", "agent-workforce", "student")
+        (self.menu / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
         report = json.loads(self.run_hook("--agent-menu"))
-        self.assertEqual(report["leftover"], [])
+        self.assertEqual((report["changed"], report["edited"]), ([], ["aibl-chief-of-staff.md"]))
         self.run_hook("--agent-menu-apply")
-        self.assertEqual((self.menu / "aibl-echo.md").read_text(), "echo\n")
+        self.assertEqual((self.menu / "aibl-chief-of-staff.md").read_text(), "chief, edition three\n")
 
     def test_a_workbench_that_only_claimed_its_copy_keeps_it(self):
         # finding 2: workbench b's copy already matched, so it copied nothing, but its apply
@@ -447,8 +466,14 @@ class LeftoverNeedsEvidence(Fixture):
 
     def test_a_remote_rewritten_away_from_the_official_repository_proves_nothing(self):
         # finding 5: the official spelling, redirected by insteadOf, is not the official repository
+        (self.course / ".claude" / "agents" / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.commit(self.course, "edition three")
+        self.fetch(self.wb)
+        (self.menu / "aibl-chief-of-staff.md").write_text("chief, edition three\n")
+        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["changed"], ["aibl-chief-of-staff.md"])
         self.git(self.wb, "config", f"url.{self.course}.insteadOf", OFFICIAL)
-        self.assertEqual(json.loads(self.run_hook("--agent-menu"))["leftover"], [])
+        report = json.loads(self.run_hook("--agent-menu"))
+        self.assertEqual((report["changed"], report["edited"]), ([], ["aibl-chief-of-staff.md"]))
 
     def test_a_running_apply_holds_a_lock(self):
         lock = self.home / ".claude" / "aibl-agent-menu.lock"
