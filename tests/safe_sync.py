@@ -1,8 +1,9 @@
 """The course's sync touches only what the course shipped; the bridge skills and the home pointer.
 
 Tyler's ruling (09-24): the agent-menu sync and its cleanup touch ONLY agents the course
-itself shipped (the allowlist in update-check.mjs). Never the student's own agents in Claude
-Code or Codex, aibl- named or not, and never other course components.
+itself shipped (found in the verified program branch's history, never a list in
+update-check.mjs). Never the student's own agents in Claude Code or Codex, aibl- named or
+not, and never other course components.
 
 Synthetic: a throwaway workbench and a throwaway home folder (HOME / USERPROFILE), so the
 real ~/.claude, ~/.codex and ~/.aibl are never touched. No app, account or installation claim.
@@ -33,9 +34,9 @@ class Fixture(unittest.TestCase):
         self.base = base
         self.wb = base / "workbench"
         self.home = base / "home"
-        # The course's published branch. Edition one shipped aibl-echo, and (to prove the
-        # allowlist is the ceiling) a -lead copy that is NOT on the allowlist; edition two
-        # retired both.
+        # The course's published branch. Edition one shipped aibl-echo, and a -lead copy that
+        # this workbench never placed (so a copy of it in the menu is never this workbench's
+        # to move); edition two retired both.
         course = base / "course"
         cagents = course / ".claude" / "agents"
         cagents.mkdir(parents=True)
@@ -96,13 +97,13 @@ class Fixture(unittest.TestCase):
         (self.base / "hidden-skills").rename(skills)
 
         # The student's home folder: their own agents in Claude Code and Codex, a course
-        # leftover, an off-list -lead copy the course history once held, and their own skills.
+        # leftover, a -lead copy the course history once held (never placed here), and their own skills.
         self.menu = self.home / ".claude" / "agents"
         self.menu.mkdir(parents=True, exist_ok=True)
         (self.menu / "my-agent.md").write_text("my own agent\n")
         (self.menu / "aibl-custom-mine.md").write_text("my own aibl- agent\n")
         (self.menu / "aibl-chief-of-staff-lead.md").write_text("terminal chief\n")
-        (self.menu / "aibl-kansa.md").write_text("on the list, but no connected program shipped it\n")
+        (self.menu / "aibl-kansa.md").write_text("a real course name, but no connected program shipped it\n")
         self.codex = self.home / ".codex" / "agents"
         self.codex.mkdir(parents=True)
         (self.codex / "my-codex-agent.toml").write_text('name = "mine"\n')
@@ -158,7 +159,7 @@ class StudentsOwnAgentsAreNeverTouched(Fixture):
         self.assertEqual(report["leftover"], ["aibl-echo.md"])
         # the student's aibl- agent in the workbench is not synced into the menu
         self.assertEqual(report["skipped"], ["aibl-custom-mine.md"])
-        # off the list, or on it but never shipped by a connected program: not ours to move
+        # never placed by this workbench, or never shipped by a connected program: not ours to move
         self.assertEqual(report["not_ours"],
                          ["aibl-chief-of-staff-lead.md", "aibl-custom-mine.md", "aibl-kansa.md"])
 
@@ -338,6 +339,10 @@ class LeftoverNeedsEvidence(Fixture):
             (other / ".claude" / "agents" / name).write_text(body)
         self.git(other, "init", "-q", "-b", "main")
         self.commit(other, "workbench b")
+        # workbench b is enrolled in the same program: the course's agents are the ones its
+        # verified branch shipped, so a workbench with no program has none to place
+        self.git(other, "remote", "add", "agent-workforce", OFFICIAL)
+        self.fetch(other)
         return other
 
     def run_in(self, wb, *args):

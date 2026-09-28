@@ -55,23 +55,12 @@ const SKILL_FOLDERS = ["aibl-personalize", "aibl-checkpoint", "aibl-enroll", "ai
 const AGENT_FILE = /^aibl-[a-z0-9-]+\.md$/;
 // Tyler's ruling (09-24): the menu sync and its cleanup touch ONLY what the course itself
 // shipped. Never the student's own agents (in Claude Code or Codex, whatever their names,
-// aibl- included), and never other course components. These are every aibl- agent file the
-// Agent Workforce student edition has ever published, derived 09-24 from the history of
-// agent-native-workforce-internal and of every branch and pull request of
-// aibuild-lab/agent-workforce. The -lead terminal copies and aibl-evy never reached a
-// published edition, so they are not here. When the course ships a new agent, add its
-// name in the same release; never take a name out (a retired name is how a leftover is
-// recognized).
-const COURSE_AGENTS = new Set([
-  "aibl-charter-steward.md",
-  "aibl-chief-of-staff.md",
-  "aibl-echo.md",
-  "aibl-gigawatt.md",
-  "aibl-kansa.md",
-  "aibl-librarian.md",
-  "aibl-the-professor.md",
-  "aibl-ygm.md",
-]);
+// aibl- included), and never other course components. And (09-24) the team is found, never
+// listed: there is no roster of course agents in this file. The course's agents are the
+// aibl-*.md files directly in .claude/agents that a connected program's VERIFIED student
+// branch has shipped at any commit of its history (courseAgents below). An old edition
+// finds its own agents, a new edition finds all of its own, and a retired name stays in
+// that history, which is how a leftover is recognized.
 // The course's bridge skills, kept as real copies in the user's skills folder so a thread
 // opened outside this workbench still has them (workforce-internal #98).
 const COURSE_SKILLS = ["aibl-bridge", "aibl-bridge-setup"];
@@ -276,9 +265,14 @@ function describe(report) {
 // --agent-menu reports; --agent-menu-apply fixes, and only aibl-update or aibl-enroll runs
 // it, after the student's yes. The rules it keeps (Tyler, 09-24: never a student's own
 // agents, never other course components):
-//   - It touches only the exact names in COURSE_AGENTS and COURSE_SKILLS. Anything else in
-//     those folders (the student's own agents and skills, aibl- named or not, in any letter
-//     case) is not_ours and never touched. Codex's folders are never touched.
+//   - It touches only the course's agents and COURSE_SKILLS. The course's agents are found,
+//     not listed: the aibl-*.md names directly in .claude/agents that a verified program
+//     branch has shipped at any commit (courseAgents). An aibl- agent in this workbench that
+//     no verified program branch ever shipped (one the student made) is skipped, never
+//     copied. With no verified program branch there are no course agents at all, so
+//     nothing is copied or moved. Anything else in the user's folders (the student's own
+//     agents and skills, aibl- named or not, in any letter case) is not_ours and never
+//     touched. Codex's folders are never touched.
 //   - A missing name is copied only when nothing sits at that name in any letter case (Mac
 //     and Windows folders ignore case): a clash is reported as case_conflict and skipped.
 //   - An existing copy that differs from this workbench's is replaced only when its bytes
@@ -560,8 +554,10 @@ function courseHistory(root) {
       if (/^[0-9a-f]{40,64}$/.test(line.trim())) { age += 1; continue; }
       const m = line.match(/^:\d+ \d+ ([0-9a-f]+) ([0-9a-f]+) \w+\t(.+)$/);
       if (!m) continue;
-      const name = path.posix.basename(m[3].trim());
-      if (!AGENT_FILE.test(name)) continue;
+      // only a file directly in .claude/agents is an agent the app lists (never one in a subfolder)
+      const file = m[3].trim();
+      const name = path.posix.basename(file);
+      if (file !== `.claude/agents/${name}` || !AGENT_FILE.test(name)) continue;
       shipped.add(name);
       const versions = blobs.get(name) || new Map();
       // the new side is what this commit published; the old side was current just before it
@@ -597,16 +593,24 @@ function olderVersion(copy, ours) {
   return Boolean(copy && ours && copy.ref === ours.ref && copy.age > ours.age);
 }
 
-function agentMenu(root) {
+function courseAgents(history) {
+  // The course's agents, found rather than listed (Tyler, 09-24): every aibl-*.md name a
+  // verified program branch has shipped directly in .claude/agents, at any commit. So an old
+  // edition's workbench finds exactly its own agents, a new edition's finds all of its own,
+  // and a retired name stays known. No verified branch, no course agents.
+  return history.shipped;
+}
+
+function agentMenu(root, history = courseHistory(root)) {
   const source = path.join(root, ".claude", "agents");
   const menu = menuFolder();
   const all = agentFiles(source).filter((name) => isRealFile(path.join(source, name)));
   // Only the course's own agents are synced. An aibl- file the student made is theirs.
-  const here = all.filter((name) => COURSE_AGENTS.has(name));
-  const skipped = all.filter((name) => !COURSE_AGENTS.has(name));
+  const course = courseAgents(history);
+  const here = all.filter((name) => course.has(name));
+  const skipped = all.filter((name) => !course.has(name));
   const placed = readPlaced();
   const others = knownOtherWorkbenches(root, placed);
-  const history = courseHistory(root);
   const byLower = entriesByLowerName(menu);
   const there = agentFiles(menu);
   const missing = [];
@@ -646,7 +650,7 @@ function agentMenu(root) {
   const gone = there.filter((name) => !here.includes(name));
   const leftover = gone.filter((name) => {
     const dest = path.join(menu, name);
-    if (!COURSE_AGENTS.has(name) || !history.shipped.has(name) || history.current.has(name)) return false;
+    if (!course.has(name) || history.current.has(name)) return false;
     if (!isRealFile(dest)) return false;
     if (!heldHere(placed, "agents", name, root, fileHash(dest))) return false;
     // no other workbench this computer knows of still has it, in any form
@@ -829,7 +833,10 @@ function applyAgentMenu(root, replaceEdited) {
 }
 
 function applyLocked(root, replaceEdited) {
-  const plan = agentMenu(root);
+  // one reading of the course's history for the plan and for every re-check below
+  const history = courseHistory(root);
+  const course = courseAgents(history);
+  const plan = agentMenu(root, history);
   if (plan.status === "no_agents") return plan;
   if (plan.linked_folders.length) {
     return { ...plan, applied: null, refused: "linked_folder",
@@ -861,7 +868,7 @@ function applyLocked(root, replaceEdited) {
     done.claimed.push(name);
   }
   for (const name of plan.missing) {
-    if (!COURSE_AGENTS.has(name)) continue; // the allowlist again, in case plan and list ever drift
+    if (!course.has(name)) continue; // the course's own again, in case plan and history ever drift
     const dest = path.join(menu, name);
     try {
       // on a folder that ignores case, a different-case file answers to this name: never touch it
@@ -874,7 +881,7 @@ function applyLocked(root, replaceEdited) {
     }
   }
   for (const name of [...plan.changed, ...plan.edited.filter((n) => approved(n, plan.edited))]) {
-    if (!COURSE_AGENTS.has(name)) continue;
+    if (!course.has(name)) continue;
     const dest = path.join(menu, name);
     try {
       if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }
@@ -888,7 +895,7 @@ function applyLocked(root, replaceEdited) {
     }
   }
   for (const name of plan.leftover) {
-    if (!COURSE_AGENTS.has(name)) continue;
+    if (!course.has(name) || history.current.has(name)) continue;
     const dest = path.join(menu, name);
     try {
       if (!unchanged(dest, plan.seen[name])) { done.skipped_changed_since_check.push(name); continue; }

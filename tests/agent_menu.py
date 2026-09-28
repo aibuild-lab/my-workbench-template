@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 HOOK = ROOT / ".claude" / "hooks" / "update-check.mjs"
 # never moved: the terminal Chief aibl-bridge-setup renders (#96), the student's own seat, a second workbench's
 NOT_OURS = ["aibl-chief-of-staff-lead.md", "aibl-my-own-seat.md", "aibl-other-workbench.md"]
-# a real course name (the hook only ever moves names on its allowlist): this fixture's course
-# shipped it in edition one and retired it in edition two
+# a course agent (the hook only ever moves names a verified program branch shipped): this
+# fixture's course shipped it in edition one and retired it in edition two
 RETIRED = "aibl-echo.md"
 
 
