@@ -67,6 +67,16 @@ const COURSE_AGENTS_FILE = ".aibl/course-agents.json";
 // records the exact sha256 of every renamed agent file it leaves, in the workbench and in the
 // global copy, here. Under work/, so a course update never touches it; read from the working tree.
 const SEAT_NAMES_FILE = "work/course/staff/seat-names.json";
+// The naming step as published before that record existed (agent-workforce up to 521234a) keeps
+// only its table, "| Seat | Name | Named on | Your yes |", here, and rewrites one line of the agent
+// file: the first "# " title line after the frontmatter, "[student names this agent], your Chief
+// of Staff" becoming "Hestia, your Chief of Staff" (a later shape is "Chief of Staff (Hestia)").
+// Read only when there is no SEAT_NAMES_FILE: a seat listed there with a name, whose file is a
+// published version but for that one title line, is the student's renamed seat.
+const LEGACY_SEAT_NAMES_FILE = "work/course/staff/seat-names.md";
+const LEGACY_NAMED_SEATS = ["aibl-chief-of-staff", "aibl-ygm"];
+const SEAT_PLACEHOLDER = "[student names this agent]";
+const SEAT_SHIPPED_NAMES = { "aibl-ygm": "You've Got Mail" };
 const COURSE_AGENTS_SCHEMA = 1;
 // Backward compatibility, for that edition only: editions published before the list existed
 // (agent-workforce up to 521234a) do not carry it, so a workbench whose HEAD has no list uses
@@ -738,6 +748,62 @@ function readSeatNames(root) {
   return names;
 }
 
+function readLegacySeatNames(root) {
+  // agent file name -> the name the published naming step recorded; empty when SEAT_NAMES_FILE
+  // exists (it rules) or there is no table
+  const names = new Map();
+  if (exists(path.join(root, ...SEAT_NAMES_FILE.split("/")))) return names;
+  let text;
+  try { text = fs.readFileSync(path.join(root, ...LEGACY_SEAT_NAMES_FILE.split("/")), "utf8"); } catch { return names; }
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.startsWith("| ")) continue;
+    const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+    if (cells.length >= 4 && LEGACY_NAMED_SEATS.includes(cells[0]) && cells[1]) names.set(`${cells[0]}.md`, cells[1]);
+  }
+  return names;
+}
+
+function titleNamed(bytes, seat, recordedName) {
+  // The agent file with its title line's name put back to what the course shipped, if the title
+  // line (the first "# " line after the frontmatter, the only line the naming step changes) names
+  // recordedName: { title, shipped: [Buffer] }; otherwise null.
+  if (!bytes) return null;
+  const text = bytes.toString("utf8");
+  if (!Buffer.from(text, "utf8").equals(bytes)) return null;
+  const lines = text.split(/(?<=\n)/);
+  const bare = (l) => l.replace(/\r?\n$/, "");
+  if (!lines.length || bare(lines[0]) !== "---") return null;
+  const close = lines.findIndex((l, i) => i > 0 && bare(l) === "---");
+  if (close < 0) return null;
+  let at = -1;
+  for (let i = close + 1; i < lines.length; i += 1) {
+    const content = bare(lines[i]);
+    if (!content.trim()) continue;
+    if (content.startsWith("# ")) at = i;
+    break;
+  }
+  if (at < 0) return null;
+  const body = bare(lines[at]);
+  const ending = lines[at].slice(body.length);
+  const value = body.slice(2);
+  let parts = null;
+  const titled = /^([^,()]+?) \(([^()]+)\)$/.exec(value);
+  if (titled) parts = { name: titled[2], before: `${titled[1]} (`, after: ")" };
+  else if (value.indexOf(", ") > 0) parts = { name: value.slice(0, value.indexOf(", ")), before: "", after: value.slice(value.indexOf(", ")) };
+  if (!parts || parts.name !== recordedName) return null;
+  const shipped = [SEAT_PLACEHOLDER, SEAT_SHIPPED_NAMES[seat]].filter(Boolean).map((n) =>
+    Buffer.from([...lines.slice(0, at), `# ${parts.before}${n}${parts.after}${ending}`, ...lines.slice(at + 1)].join(""), "utf8"));
+  // how the student hears it: "Chief of Staff (Hestia)", whichever shape the title line has
+  const title = titled ? value : `${parts.after.slice(2).replace(/^your /, "")} (${parts.name})`;
+  return { title, shipped };
+}
+
+function legacyRenamedTitle(entry, bytes, name, recordedName) {
+  // the title, when these bytes are a published version of name but for the recorded name in its title
+  const named = titleNamed(bytes, name.replace(/\.md$/, ""), recordedName);
+  return named && named.shipped.some((b) => versionOf(entry, b)) ? named.title : null;
+}
+
 function versionOf(entry, bytes) {
   // Which course version these exact bytes are: null when they are none. The list already
   // carries each version as committed and as Git for Windows checks it out, so the bytes are
@@ -794,6 +860,8 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   // Technical Operator re-applies the name). Either way the hook never copies, replaces or
   // records it, and leaves its menu copy to the naming step, which refreshes it.
   const seatNames = readSeatNames(root);
+  const legacySeatNames = readLegacySeatNames(root);
+  const legacyRenamed = new Set(); // named by the published naming step, read from its table
   const renamed = [];
   const renameWaiting = [];
   const renameTitles = {};
@@ -804,6 +872,15 @@ function agentMenu(root, catalog = courseCatalog(root)) {
     if (named && bytes) {
       renameTitles[name] = named.title;
       if (named.sums.has(sha256(bytes))) { renamed.push(name); renamedBytes[name] = bytes; } else renameWaiting.push(name);
+      continue;
+    }
+    const legacyName = agents.has(name) && legacySeatNames.get(name);
+    const legacyTitle = legacyName && legacyRenamedTitle(agents.get(name), bytes, name, legacyName);
+    if (legacyTitle) {
+      renameTitles[name] = legacyTitle;
+      renamed.push(name);
+      renamedBytes[name] = bytes;
+      legacyRenamed.add(name);
       continue;
     }
     // the course's only with a course name AND the bytes of a version the course published
@@ -858,6 +935,22 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   // Never copied or recorded, and always reported, whatever the menu holds (both files are
   // left exactly as they are).
   const nameConflict = skipped.filter((name) => agents.has(name));
+  // A seat named by the published naming step whose menu entry is an exact course copy: that copy
+  // is replaced by the student's named file (previewed, --expect, the old copy kept in a backup).
+  // Any other menu bytes are left alone and reported.
+  const renamedReplace = [];
+  const renamedMenuConflict = [];
+  for (const name of renamed.filter((n) => legacyRenamed.has(n))) {
+    if (byLower.get(name.toLowerCase()) !== name) continue; // missing: added below; another case: left alone
+    const snap = snapshot(path.join(menu, name));
+    if (!snap.link && snap.bytes && snap.bytes.equals(renamedBytes[name])) continue; // in step
+    if (!snap.link && versionOf(agents.get(name), snap.bytes)) {
+      renamedReplace.push(name);
+      seen[name] = snap.fp;
+    } else {
+      renamedMenuConflict.push(name);
+    }
+  }
   const gone = there.filter((name) => !here.includes(name) && !renamed.includes(name) && !renameWaiting.includes(name));
   const leftover = gone.filter((name) => {
     const entry = agents.get(name);
@@ -877,21 +970,23 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const skills = here.length ? bridgeSkills(root, placed, others)
     : { skills_folder: skillsFolder(), missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
   const linked = linkedClaudeFolders();
-  const empty = !here.length && !leftover.length && !nameConflict.length && !renameWaiting.length && !renamedMissing.length;
+  const empty = !here.length && !leftover.length && !nameConflict.length && !renameWaiting.length && !renamedMissing.length &&
+    !renamedReplace.length && !renamedMenuConflict.length;
   const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length +
-    renamedMissing.length;
+    renamedMissing.length + renamedReplace.length;
   const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length + nameConflict.length +
-    renameWaiting.length;
+    renameWaiting.length + renamedMenuConflict.length;
   let status = empty ? "no_agents" : pending ? "out_of_step" : toAsk ? "needs_a_decision" : "in_step";
   if (linked.length && (pending || toAsk)) status = "linked_folder";
   const report = { status, workbench: root, menu_folder: menu, course_agents_from: catalog.from, missing, changed, older, edited,
     leftover, not_ours: notOurs, skipped, name_conflict: nameConflict, renamed, renamed_missing: renamedMissing,
+    renamed_replace: renamedReplace, renamed_menu_conflict: renamedMenuConflict,
     rename_waiting: renameWaiting,
     rename_titles: renameTitles, other_workbench: otherWorkbench,
     case_conflict: caseConflict, linked_folders: linked, skills, in_step: inStepNames, seen };
   // the bytes of each workbench agent the plan would copy: the apply writes only these exact bytes
   const sources = Object.fromEntries([...here.map((name) => [name, sha256(ourBytes[name])]),
-    ...renamedMissing.map((name) => [name, sha256(renamedBytes[name])])]);
+    ...[...renamedMissing, ...renamedReplace].map((name) => [name, sha256(renamedBytes[name])])]);
   Object.defineProperty(report, "sources", { value: sources, enumerable: false });
   report.preview_sha256 = previewHash(report, root);
   return report;
@@ -906,7 +1001,8 @@ function previewHash(report, root) {
     case_conflict: r.case_conflict, other_workbench: r.other_workbench, in_step: r.in_step, seen: r.seen });
   const skillSources = Object.fromEntries(COURSE_SKILLS.map((name) => [name, treeHash(path.join(root, ".claude", "skills", name))]));
   return sha256(Buffer.from(JSON.stringify({ agents: { ...pick(report), name_conflict: report.name_conflict, renamed: report.renamed,
-    renamed_missing: report.renamed_missing,
+    renamed_missing: report.renamed_missing, renamed_replace: report.renamed_replace,
+    renamed_menu_conflict: report.renamed_menu_conflict,
     rename_waiting: report.rename_waiting, sources: report.sources },
     skills: { ...pick(report.skills), sources: skillSources } })));
 }
@@ -1225,6 +1321,35 @@ function applyLocked(root, replaceEdited, expect) {
       if (temp) dropTemp(temp);
     }
   }
+  // A seat named by the published naming step, whose menu entry is still the course's copy: the
+  // student's named file, exactly as the plan saw it, replaces it the same safe way (the course copy
+  // kept in the backup). The named file is the student's, so it is never recorded as a course copy.
+  for (const name of plan.renamed_replace) {
+    const dest = path.join(menu, name);
+    let temp = null;
+    try {
+      const bytes = fs.readFileSync(path.join(source, name));
+      if (sha256(bytes) !== plan.sources[name]) { done.skipped_changed_since_check.push(name); continue; }
+      temp = staged(bytes);
+      const before = snapshot(dest);
+      if (before.fp !== plan.seen[name]) { done.skipped_changed_since_check.push(name); continue; }
+      const kept = backupCopy(before, path.join("replaced", name));
+      if (snapshot(dest).fp !== plan.seen[name]) {
+        try { fs.unlinkSync(kept); } catch { /* leave it; it is only a copy */ }
+        done.skipped_changed_since_check.push(name);
+        continue;
+      }
+      fs.renameSync(temp, dest);
+      temp = null;
+      release(placed, "agents", name, root);
+      done.replaced.push(name);
+      done.copied.push(name);
+    } catch (error) {
+      done.errors.push(`${name}: ${error.code || "copy_failed"}`);
+    } finally {
+      if (temp) dropTemp(temp);
+    }
+  }
   for (const name of [...plan.changed, ...plan.edited.filter((n) => approved(n, plan.edited))]) {
     const dest = path.join(menu, name);
     let temp = null;
@@ -1302,8 +1427,15 @@ function describeAgentMenu(menu) {
   const differ = menu.changed.filter((n) => !menu.older.includes(n));
   const skillsDiffer = menu.skills.changed.filter((n) => !menu.skills.older.includes(n));
   if (menu.missing.length) bits.push(`not in the @ agent menu yet: ${menu.missing.join(", ")}`);
+  const titleOf = (name) => (menu.rename_titles || {})[name] || name;
   for (const name of menu.renamed_missing || []) {
-    bits.push(`your renamed ${(menu.rename_titles || {})[name] || name} is not in the @ agent menu yet (${name})`);
+    bits.push(`your renamed ${titleOf(name)} is not in the @ agent menu yet (${name})`);
+  }
+  for (const name of menu.renamed_replace || []) {
+    bits.push(`the @ agent menu still has the course's copy of your renamed ${titleOf(name)} (${name}); the fix puts your named version there, and the course's copy goes to a backup`);
+  }
+  for (const name of menu.renamed_menu_conflict || []) {
+    bits.push(`the @ agent menu has a copy of your renamed ${titleOf(name)} (${name}) that is neither your named version nor a course version, so it is left alone`);
   }
   if (older.length) bits.push(`older course versions in the user folder (this workbench has a newer course version): ${older.join(", ")}`);
   if (differ.length) bits.push(`course copies in the menu that differ from this workbench's: ${differ.join(", ")}`);
