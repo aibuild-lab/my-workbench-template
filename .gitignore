@@ -4,6 +4,9 @@
 .env.*
 !.env.example
 .claude/settings.local.json
+# Customer messages, job evidence and raw owner writing stay on this computer.
+/runs/
+/work/course/staff/voice-samples.md
 __pycache__/
 *.pyc
 .DS_Store
