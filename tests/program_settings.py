@@ -33,6 +33,20 @@ class ProgramSettings(unittest.TestCase):
         self.assertIn("A program never ships `.claude/settings.json`", text)
         self.assertIn("change permissions (other than step 6's previewed team settings, on a yes)", text)
 
+    def test_enroll_writes_its_preview_in_the_chat_before_any_yes(self):
+        # Workforce decision 15 (WF-17, WF-18): the app folds command output away, so a preview that
+        # lives only there was approved unseen; the web rule covers the student's own sessions too.
+        text = self.skill('aibl-enroll')
+        self.assertIn('**Then write the preview in this conversation, in plain words, before you ask.**', text)
+        self.assertIn('never ask them to approve something "as previewed" or "above" when it exists only in command output', text)
+        self.assertIn('never a count from memory', text)
+        self.assertIn('write a plain message in this conversation (not only in command output)', text)
+        self.assertIn('"One of these settings turns off web search and opening web pages in Claude Code, for every '
+                      'conversation in this folder, yours included, not only your agents\'.', text)
+        self.assertIn('To look something up online, start a conversation outside your workbench.', text)
+        self.assertIn("Never change or drop that rule yourself; it is the course's.", text)
+        self.assertNotIn('as previewed?', text)
+
     def test_update_runs_the_same_step_on_every_update(self):
         text = self.skill('aibl-update')
         self.assertIn("Then add the team's settings exactly as `aibl-enroll` step 6 describes.", text)
