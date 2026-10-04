@@ -4,6 +4,12 @@ root=$(mktemp -d)
 trap 'rm -rf "$root"' EXIT
 template_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 if grep -F 'git checkout template/main -- .claude/skills/aibl-personalize' "$template_root/.claude/skills/aibl-update/SKILL.md"; then exit 1; fi
+# decision 40: unsaved lesson work is offered a save (the update continues), and a partial merge is never recommended
+for app in .claude .agents; do
+  grep -qF 'Save it now and continue the update? (yes / no)' "$template_root/$app/skills/aibl-update/SKILL.md"
+  grep -qF 'Never call a partial update recommended.' "$template_root/$app/skills/aibl-update/SKILL.md"
+  if grep -qE 'skip the [0-9]+ \(Recommended\)' "$template_root/$app/skills/aibl-update/SKILL.md"; then exit 1; fi
+done
 template="$root/template"
 workbench="$root/workbench"
 mkdir -p "$template/.claude/skills/aibl-update" "$template/.claude/skills/aibl-enroll" "$workbench/.claude/skills/aibl-update" "$workbench/.claude/skills/aibl-enroll"

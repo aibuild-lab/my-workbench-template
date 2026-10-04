@@ -6,12 +6,15 @@
 //     template have published, and say in one sentence whether anything is waiting.
 //   node .claude/hooks/update-check.mjs --json
 //     the same check as a report; this is what aibl-update reads before it acts.
-//   node .claude/hooks/update-check.mjs --agent-menu [--agent-menu-apply --expect <preview_sha256>]
+//   node .claude/hooks/update-check.mjs --agent-menu [--agent-menu-apply --expect <preview_sha256>
+//                                                    [--replace-edited NAME] [--refresh-from-home]]
 //     whether Claude Code's @ agent menu lists the course's agents from this workbench, and
 //     whether the course's bridge skills are in the user's skills folder (see "The Claude
 //     Code agent menu" below); the hook adds one line when they are not.
 //   node .claude/hooks/update-check.mjs --home-workbench [--home-workbench-apply]
 //     whether ~/.aibl/workbench.json records this workbench as the home workbench.
+//   node .claude/hooks/update-check.mjs --seat-titles
+//     whether a renamed Chief of Staff's title is written in two shapes (read-only; see below).
 //
 //   Team settings: a program never ships .claude/settings.json. A program that has settings of its
 //   own ships a merge script (PROGRAM_SETTINGS below); the check runs that script's read-only preview
@@ -51,6 +54,10 @@ const PROGRAM_SETTINGS = { "agent-workforce": "workforce/house/settings-merge.mj
 const SETTINGS_PREVIEW_TIMEOUT_MS = 15000;
 const SKILL_FOLDERS = ["aibl-personalize", "aibl-checkpoint", "aibl-enroll", "aibl-update"]
   .flatMap((name) => [`.claude/skills/${name}`, `.agents/skills/${name}`]);
+// The update paste: the one route that always runs the newest update procedure (aibl-installer START-HERE.md).
+const UPDATE_PASTE_NAME = "Later: update your workbench";
+const START_HERE_URL = "https://github.com/aibuild-lab/aibl-installer/blob/main/START-HERE.md";
+const UPDATE_PROMPT_URL = "https://raw.githubusercontent.com/aibuild-lab/aibl-installer/main/UPDATE-PROMPT.md";
 // the agent menu's files (see "The Claude Code agent menu"); declared up here because main() runs below
 const AGENT_FILE = /^aibl-[a-z0-9-]+\.md$/;
 // Tyler's ruling (09-24): the menu sync and its cleanup touch ONLY what the course itself
@@ -203,6 +210,17 @@ const LEGACY_EDITION = {
 // The course's bridge skills, kept as real copies in the user's skills folder so a thread
 // opened outside this workbench still has them (workforce-internal #98).
 const COURSE_SKILLS = ["aibl-bridge", "aibl-bridge-setup"];
+// --seat-titles (see "A renamed Chief's title in two shapes" below); declared up here because main() runs below
+const CHIEF_TITLE_FILES = [
+  ".claude/agents/aibl-chief-of-staff.md",
+  ".claude/agents/aibl-chief-of-staff-lead.md",
+  ".codex/agents/aibl-chief-of-staff.toml",
+  "workforce/profiles/aibl-chief-of-staff.capability-profile.yaml",
+  "workforce/ROSTER.md",
+];
+// a title line, a profile display_name, or a roster entry: never the prose that mentions "your Chief of Staff"
+const OLD_CHIEF_TITLE = /^(?:#\s+|display_name:\s*"?|title:\s*"?|- \*\*)([^,()"*\r\n]+?), your Chief of Staff\b/gm;
+const NEW_CHIEF_TITLE = /^(?:#\s+|display_name:\s*"?|title:\s*"?|- \*\*)Chief of Staff \(([^()\r\n]+)\)/gm;
 const HOME_POINTER_SCHEMA = "aibl.home-workbench/v1";
 const PLACED_SCHEMA = "aibl.agent-menu-placed/v2";
 const WINDOWS = process.platform === "win32";
@@ -223,9 +241,14 @@ function main() {
       const root = resolveRoot({});
       const report = root ? homeWorkbench(root) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--seat-titles")) {
+      const root = resolveRoot({});
+      const report = root ? seatTitles(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
     } else if (process.argv.includes("--agent-menu-apply")) {
       const root = resolveRoot({});
-      const report = root ? applyAgentMenu(root, replaceEditedArgs(), argValue("--expect")) : { status: "not_a_workbench" };
+      const report = root ? applyAgentMenu(root, replaceEditedArgs(), argValue("--expect"), process.argv.includes("--refresh-from-home"))
+        : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
     } else if (process.argv.includes("--agent-menu")) {
       const root = resolveRoot({});
@@ -379,7 +402,7 @@ function describe(report) {
       parts.push(`${p.label} has ${editions}${published}`);
     }
   }
-  if (report.skills.changed) parts.push("the workbench skills have an update from the template");
+  if (report.skills.changed) parts.push("the workbench's own update skills (the aibl- core skills) are older than the template's");
   const settings = [];
   for (const p of report.programs) {
     const t = p.team_settings;
@@ -391,9 +414,18 @@ function describe(report) {
   }
   if (!parts.length && !settings.length) return null;
   const all = [...parts, ...settings];
-  const offer = settings.length
-    ? "Tell the student in one line and offer aibl-update, which shows what changes and previews the team settings, adding them only on a yes. Do not run it unasked."
-    : "Tell the student in one line and offer aibl-update, which shows what changes before merging. Do not run it unasked.";
+  // Decision 40 (WF-60): an out-of-date aibl-update cannot fix itself mid-run, and older copies
+  // recommended merging around the files they did not know. When the core skills are behind,
+  // the route is the update paste, which is fetched fresh every time and refreshes them first.
+  const offer = report.skills.changed
+    ? "Tell the student in one line and recommend the update paste, not aibl-update: this workbench's own copy of aibl-update " +
+      `is older than the course's, and an older copy can't update itself mid-run. The paste is "${UPDATE_PASTE_NAME}" on the ` +
+      `installer's Start Here page (${START_HERE_URL}); it fetches the newest update procedure (${UPDATE_PROMPT_URL}) every time ` +
+      "and refreshes these skills before it touches any program. Offer to start it now by fetching that procedure and following " +
+      "it from step 1; if you cannot fetch it, ask the student to paste it. Never call a partial update recommended. Do not run anything unasked."
+    : settings.length
+      ? "Tell the student in one line and offer aibl-update, which shows what changes and previews the team settings, adding them only on a yes. Do not run it unasked."
+      : "Tell the student in one line and offer aibl-update, which shows what changes before merging. Do not run it unasked.";
   return `AIBL workbench update check, nothing was changed: ${all.join("; ")}. ${offer}`;
 }
 
@@ -435,7 +467,10 @@ function describe(report) {
 //     version are also listed as older. A record of having placed some bytes is not enough
 //     (an older sync could have placed the student's own file under a course name). A copy
 //     that matches another known workbench's current file is that workbench's
-//     (other_workbench, kept). Anything else is edited, kept; the agent asks the student,
+//     (other_workbench, kept), unless ~/.aibl/workbench.json names THIS workbench as home and
+//     the copy is a course version: then the menu follows the home workbench, and the copy is
+//     offered as from_other_workbench, replaced only with --refresh-from-home on its own yes
+//     (decision 45, WF-16). Anything else is edited, kept; the agent asks the student,
 //     and only --replace-edited NAME replaces it. Line endings alone are not a difference.
 //     (A bridge skill copy is still course-made when its bytes are recorded as placed.)
 //   - A leftover (a retired course agent) is removed only when this workbench's list says
@@ -888,6 +923,12 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   }
   const placed = readPlaced();
   const others = knownOtherWorkbenches(root, placed);
+  // Decision 45 (WF-16): the menu follows the home workbench. Once ~/.aibl/workbench.json names this
+  // workbench, a copy another workbench placed is offered here (from_other_workbench, its own yes,
+  // --refresh-from-home), but only when its bytes are a version the course published; anything else
+  // another workbench holds stays theirs (other_workbench), and edited copies are never replaced unasked.
+  const isHome = homeWorkbench(root).status === "this_workbench";
+  const fromOtherFolders = new Set();
   const byLower = entriesByLowerName(menu);
   const there = agentFiles(menu);
   const missing = [];
@@ -899,6 +940,7 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   const older = []; // the part of changed proven to be an older course version than this workbench's
   const edited = [];
   const otherWorkbench = [];
+  const fromOther = [];
   const inStepNames = [];
   const seen = {};
   for (const name of here) {
@@ -911,12 +953,19 @@ function agentMenu(root, catalog = courseCatalog(root)) {
     const ours = ourBytes[name];
     // line endings alone (a CRLF checkout against an LF copy) are not a difference
     if (!snap.link && sameTextBytes(ours, snap.bytes)) { inStepNames.push(name); continue; }
-    // another known workbench's current copy: theirs
-    if (snap.content && others.some((wb) => {
+    // another known workbench's current copy: theirs, unless this is the home workbench now and
+    // the copy is a course version (then it is offered, on its own yes)
+    const holder = snap.content ? others.find((wb) => {
       const theirs = readBytes(path.join(wb, ".claude", "agents", name));
       return Boolean(theirs && theirs.equals(snap.content));
-    })) {
-      otherWorkbench.push(name);
+    }) : undefined;
+    if (holder) {
+      if (isHome && !snap.link && versionOf(agents.get(name), snap.content)) {
+        fromOther.push(name);
+        fromOtherFolders.add(holder);
+      } else {
+        otherWorkbench.push(name);
+      }
       continue;
     }
     const theirs = versionOf(agents.get(name), snap.content);
@@ -967,15 +1016,18 @@ function agentMenu(root, catalog = courseCatalog(root)) {
   });
   const notOurs = gone.filter((name) => !leftover.includes(name));
   // the bridge skills only come with the course's agents; a workbench with none gets none
-  const skills = here.length ? bridgeSkills(root, placed, others)
-    : { skills_folder: skillsFolder(), missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [], in_step: [], seen: {}, errors: [] };
+  const skills = here.length ? bridgeSkills(root, placed, others, isHome)
+    : { skills_folder: skillsFolder(), missing: [], changed: [], older: [], edited: [], other_workbench: [], from_other_workbench: [],
+      case_conflict: [], in_step: [], seen: {}, errors: [] };
+  for (const wb of skills.from_other_folders || []) fromOtherFolders.add(wb);
+  delete skills.from_other_folders;
   const linked = linkedClaudeFolders();
   const empty = !here.length && !leftover.length && !nameConflict.length && !renameWaiting.length && !renamedMissing.length &&
     !renamedReplace.length && !renamedMenuConflict.length;
   const pending = missing.length + changed.length + leftover.length + skills.missing.length + skills.changed.length +
     renamedMissing.length + renamedReplace.length;
   const toAsk = edited.length + skills.edited.length + caseConflict.length + skills.case_conflict.length + nameConflict.length +
-    renameWaiting.length + renamedMenuConflict.length;
+    renameWaiting.length + renamedMenuConflict.length + fromOther.length + skills.from_other_workbench.length;
   let status = empty ? "no_agents" : pending ? "out_of_step" : toAsk ? "needs_a_decision" : "in_step";
   if (linked.length && (pending || toAsk)) status = "linked_folder";
   const report = { status, workbench: root, menu_folder: menu, course_agents_from: catalog.from, missing, changed, older, edited,
@@ -983,6 +1035,7 @@ function agentMenu(root, catalog = courseCatalog(root)) {
     renamed_replace: renamedReplace, renamed_menu_conflict: renamedMenuConflict,
     rename_waiting: renameWaiting,
     rename_titles: renameTitles, other_workbench: otherWorkbench,
+    from_other_workbench: fromOther, from_other_folders: [...fromOtherFolders].sort(), home_workbench: isHome,
     case_conflict: caseConflict, linked_folders: linked, skills, in_step: inStepNames, seen };
   // the bytes of each workbench agent the plan would copy: the apply writes only these exact bytes
   const sources = Object.fromEntries([...here.map((name) => [name, sha256(ourBytes[name])]),
@@ -998,7 +1051,8 @@ function previewHash(report, root) {
   // skills alike. --agent-menu-apply --expect VALUE refuses to act unless its own fresh plan
   // hashes to exactly this.
   const pick = (r) => ({ missing: r.missing, changed: r.changed, older: r.older, edited: r.edited, leftover: r.leftover,
-    case_conflict: r.case_conflict, other_workbench: r.other_workbench, in_step: r.in_step, seen: r.seen });
+    case_conflict: r.case_conflict, other_workbench: r.other_workbench, from_other_workbench: r.from_other_workbench,
+    in_step: r.in_step, seen: r.seen });
   const skillSources = Object.fromEntries(COURSE_SKILLS.map((name) => [name, treeHash(path.join(root, ".claude", "skills", name))]));
   return sha256(Buffer.from(JSON.stringify({ agents: { ...pick(report), name_conflict: report.name_conflict, renamed: report.renamed,
     renamed_missing: report.renamed_missing, renamed_replace: report.renamed_replace,
@@ -1041,11 +1095,11 @@ function treeHash(dir, withModes = true) {
   return h.digest("hex");
 }
 
-function bridgeSkills(root, placed, others) {
+function bridgeSkills(root, placed, others, isHome = false) {
   const folder = skillsFolder();
   const byLower = entriesByLowerName(folder);
-  const out = { skills_folder: folder, missing: [], changed: [], older: [], edited: [], other_workbench: [], case_conflict: [],
-    in_step: [], seen: {}, errors: [] };
+  const out = { skills_folder: folder, missing: [], changed: [], older: [], edited: [], other_workbench: [], from_other_workbench: [],
+    case_conflict: [], in_step: [], seen: {}, errors: [], from_other_folders: [] };
   // the workbench's own folder, as the plan saw it: the apply installs only exactly this
   const sources = {};
   Object.defineProperty(out, "sources", { value: sources, enumerable: false });
@@ -1062,8 +1116,17 @@ function bridgeSkills(root, placed, others) {
     out.seen[name] = fingerprint(dest);
     const theirs = isLink(dest) ? null : treeHash(dest);
     if (theirs === ours) { out.in_step.push(name); continue; }
-    if (theirs && others.some((wb) => treeHash(path.join(wb, ".claude", "skills", name)) === theirs)) {
-      out.other_workbench.push(name);
+    const holder = theirs ? others.find((wb) => treeHash(path.join(wb, ".claude", "skills", name)) === theirs) : undefined;
+    if (holder) {
+      // the home workbench takes over a course-made copy another workbench placed (decision 45), on its own yes
+      const courseMade = (placed.skills[name] && placed.skills[name].hashes.includes(theirs)) ||
+        Boolean(skillVersion(publishedSkillVersions(root, name), dest));
+      if (isHome && courseMade) {
+        out.from_other_workbench.push(name);
+        out.from_other_folders.push(holder);
+      } else {
+        out.other_workbench.push(name);
+      }
       continue;
     }
     const linkToOurs = isLink(dest);
@@ -1161,19 +1224,26 @@ function takeLock() {
   return null;
 }
 
-function applyAgentMenu(root, replaceEdited, expect) {
+function applyAgentMenu(root, replaceEdited, expect, refreshFromHome = false) {
   const unlock = takeLock();
   if (!unlock) {
     return { status: "busy", explain: "Another agent-menu update is running right now. Nothing was changed; try again in a minute." };
   }
   try {
-    return applyLocked(root, replaceEdited, expect);
+    return applyLocked(root, replaceEdited, expect, refreshFromHome);
   } finally {
     unlock();
   }
 }
 
-function applyLocked(root, replaceEdited, expect) {
+function releaseOthers(placed, group, name, root) {
+  // this workbench now holds the copy: no other workbench is recorded as holding that name
+  const entry = placed[group][name];
+  if (!entry) return;
+  for (const wb of Object.keys(entry.holders)) if (!sameWorkbench(wb, root)) delete entry.holders[wb];
+}
+
+function applyLocked(root, replaceEdited, expect, refreshFromHome = false) {
   // one reading of the course's list for the plan and for every check below
   const catalog = courseCatalog(root);
   const plan = agentMenu(root, catalog);
@@ -1200,7 +1270,7 @@ function applyLocked(root, replaceEdited, expect) {
   const placed = readPlaced();
   const backup = path.join(backupRoot(), uniqueStamp());
   const done = { copied: [], replaced: [], removed: [], claimed: [], skills_copied: [], skipped_changed_since_check: [],
-    removed_to: null, errors: [] };
+    taken_from_other_workbench: [], removed_to: null, errors: [] };
   const backupFolder = () => {
     if (!exists(backup)) { fs.mkdirSync(backupRoot(), { recursive: true }); fs.mkdirSync(backup); }
     done.removed_to = backup;
@@ -1350,7 +1420,9 @@ function applyLocked(root, replaceEdited, expect) {
       if (temp) dropTemp(temp);
     }
   }
-  for (const name of [...plan.changed, ...plan.edited.filter((n) => approved(n, plan.edited))]) {
+  // the home workbench's copies replace the course copies another workbench placed, only on --refresh-from-home
+  const takeOver = refreshFromHome && plan.home_workbench ? plan.from_other_workbench : [];
+  for (const name of [...plan.changed, ...plan.edited.filter((n) => approved(n, plan.edited)), ...takeOver]) {
     const dest = path.join(menu, name);
     let temp = null;
     try {
@@ -1368,6 +1440,7 @@ function applyLocked(root, replaceEdited, expect) {
       fs.renameSync(temp, dest); // replaces the entry itself; a link's target is never written
       temp = null;
       hold(placed, "agents", name, root, sha256(bytes));
+      if (takeOver.includes(name)) { releaseOthers(placed, "agents", name, root); done.taken_from_other_workbench.push(name); }
       done.replaced.push(name);
       done.copied.push(name);
     } catch (error) {
@@ -1402,7 +1475,8 @@ function applyLocked(root, replaceEdited, expect) {
     hold(placed, "skills", name, root, treeHash(path.join(skillsFolder(), name)));
     done.claimed.push(`skill ${name}`);
   }
-  for (const name of [...sk.missing, ...sk.changed, ...sk.edited.filter((n) => approved(n, sk.edited))]) {
+  const skillsTakeOver = refreshFromHome && plan.home_workbench ? sk.from_other_workbench : [];
+  for (const name of [...sk.missing, ...sk.changed, ...sk.edited.filter((n) => approved(n, sk.edited)), ...skillsTakeOver]) {
     if (!COURSE_SKILLS.includes(name)) continue;
     const dest = path.join(skillsFolder(), name);
     try {
@@ -1410,6 +1484,10 @@ function applyLocked(root, replaceEdited, expect) {
       if (fingerprint(dest) !== expected) { done.skipped_changed_since_check.push(`skill ${name}`); continue; }
       copySkill(root, name, dest, keep, sk.sources[name]);
       hold(placed, "skills", name, root, treeHash(dest));
+      if (skillsTakeOver.includes(name)) {
+        releaseOthers(placed, "skills", name, root);
+        done.taken_from_other_workbench.push(`skill ${name}`);
+      }
       done.skills_copied.push(name);
     } catch (error) {
       if (!changedSinceCheck(`skill ${name}`, error)) done.errors.push(`skill ${name}: ${error.code || "copy_failed"}`);
@@ -1446,6 +1524,12 @@ function describeAgentMenu(menu) {
   if (edited.length) bits.push(`copies in the user folder with changes that are not from any course version (never replaced unasked): ${edited.join(", ")}`);
   const clashes = [...menu.case_conflict, ...menu.skills.case_conflict];
   if (clashes.length) bits.push(`files whose names differ only in capital letters are in the way (never touched): ${clashes.join(", ")}`);
+  const fromOther = [...(menu.from_other_workbench || []), ...((menu.skills.from_other_workbench || []).map((n) => `skill ${n}`))];
+  const otherNames = (menu.from_other_folders || []).map((wb) => path.basename(wb));
+  if (fromOther.length) {
+    bits.push(`this is the home workbench now, but ${fromOther.length === 1 ? "1 menu entry is" : `${fromOther.length} menu entries are`} ` +
+      `still the copies another workbench (${otherNames.join(", ")}) placed: ${fromOther.join(", ")}`);
+  }
   const conflicts = menu.name_conflict || [];
   const waiting = menu.rename_waiting || [];
   for (const name of waiting) {
@@ -1470,6 +1554,13 @@ function describeAgentMenu(menu) {
     "yes add `--replace-edited NAME`. Such a copy may be an agent of their own that only shares a course agent's name: " +
     "if they say so, recommend no, and suggest they rename theirs without the aibl- prefix. If they would rather not, drop " +
     "it for this conversation." +
+    (fromOther.length ? " Ask about the copies from the other workbench separately, in these words (with the real folder name " +
+      `and count): "Your agent menu is still using labels from your other workbench, **${otherNames[0] || "NAME"}**, for ` +
+      `${fromOther.length} ${fromOther.length === 1 ? "agent" : "agents"}. Your agents themselves are up to date: when you pick one here, ` +
+      "your current workbench's version runs. Only the short descriptions in the menu are older. Want me to refresh the menu " +
+      "from this workbench? (yes / no)\" Recommend yes, because this is the workbench they chose as home, and say the old copies " +
+      "go to a backup. Only on that yes add `--refresh-from-home` to the apply. It replaces only copies whose contents are a " +
+      "version the course published; edited copies keep their own question." : "") +
     (waiting.length ? " For each renamed seat with a course update waiting, tell the student that line as it is and " +
       "that the Technical Operator (Gigawatt) re-applies their name: it runs " +
       "`python3 workforce/skills/aibl-agent-setup/scripts/name_seat.py --reapply` itself, which puts the name back into " +
@@ -1478,6 +1569,64 @@ function describeAgentMenu(menu) {
       "name as a course agent but is not a course version (their own agent, or a course agent they changed here), so the " +
       "menu sync leaves it and the menu alone; if it is an agent of their own, suggest renaming it without the aibl- " +
       "prefix. There is nothing to apply for it." : "");
+}
+
+// ---------------------------------------------------------------------------
+// A renamed Chief's title in two shapes (decision 45, WF-58)
+// ---------------------------------------------------------------------------
+//
+// The naming step writes a seat's name into its title. An older edition's title read
+// "Spyro, your Chief of Staff"; the current one reads "Chief of Staff (Spyro)". A student who
+// renamed their Chief and then combined an update's conflict by hand (before template a8e4644,
+// 09-29) can end up with both shapes across the Chief's files. name_seat.py --reapply keeps the
+// shape each line has, so it never tidies that. --seat-titles reports it, read-only; aibl-update
+// offers the repair: take the program's copy of the old-shape files, then --reapply writes the
+// recorded name back in the current shape. It never guesses a name: with no record it says so.
+function recordedChiefName(root) {
+  // the name the naming step recorded: seat-names.json's title, else the seat-names.md table
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(root, ...SEAT_NAMES_FILE.split("/")), "utf8"));
+    const entry = parsed && parsed.agents && parsed.agents["aibl-chief-of-staff.md"];
+    const m = entry && typeof entry.title === "string" ? /\(([^()]+)\)\s*$/.exec(entry.title) || /^([^,]+), /.exec(entry.title) : null;
+    if (m && m[1].trim() && m[1].trim() !== SEAT_PLACEHOLDER) return m[1].trim();
+  } catch { /* no json record */ }
+  try {
+    const text = fs.readFileSync(path.join(root, ...LEGACY_SEAT_NAMES_FILE.split("/")), "utf8");
+    for (const line of text.split(/\r?\n/)) {
+      const cells = line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+      if (line.startsWith("| ") && cells.length >= 4 && cells[0] === "aibl-chief-of-staff" && cells[1]) return cells[1];
+    }
+  } catch { /* no table */ }
+  return null;
+}
+
+function seatTitles(root) {
+  const oldShape = [];
+  const newShape = [];
+  const names = new Set();
+  for (const rel of CHIEF_TITLE_FILES) {
+    const file = path.join(root, ...rel.split("/"));
+    if (!isRealFile(file)) continue;
+    let text;
+    try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
+    const olds = [...text.matchAll(OLD_CHIEF_TITLE)].map((m) => m[1].trim());
+    const news = [...text.matchAll(NEW_CHIEF_TITLE)].map((m) => m[1].trim());
+    if (olds.length) oldShape.push(rel);
+    if (news.length) newShape.push(rel);
+    for (const n of [...olds, ...news]) if (n !== SEAT_PLACEHOLDER) names.add(n);
+  }
+  const recorded = recordedChiefName(root);
+  const base = { seat: "aibl-chief-of-staff", recorded_name: recorded, names_found: [...names].sort(),
+    old_shape: oldShape, new_shape: newShape };
+  if (!oldShape.length || !newShape.length) {
+    return { status: recorded ? "one_shape" : "not_named", ...base, fix: [] };
+  }
+  if (!recorded) {
+    return { status: "two_shapes_no_record", ...base, fix: [],
+      explain: "The Chief's title is written two ways, and there is no saved name to write back. Ask the student for the name; never guess." };
+  }
+  return { status: "two_shapes", ...base, fix: oldShape,
+    explain: "Take the program's copy of each file in fix, then run name_seat.py --reapply, which writes the recorded name back in the current shape." };
 }
 
 // ---------------------------------------------------------------------------
