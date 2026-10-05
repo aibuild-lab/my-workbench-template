@@ -7,6 +7,16 @@
 # Customer messages, job evidence and raw owner writing stay on this computer.
 /runs/
 /work/course/staff/voice-samples.md
+# Week 3: mail attachments held for checking, logs, saved original emails, the voice package,
+# mail and practice account records, and the agents' local notes stay on this computer too.
+/quarantine/
+/logs/
+*.log
+/library/originals/
+/work/course/staff/voice*
+**/*-accounts.yaml
+/.claude/agent-memory-local/
+**/.claude/settings.local.json
 __pycache__/
 *.pyc
 .DS_Store

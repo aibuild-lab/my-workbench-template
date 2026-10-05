@@ -26,7 +26,7 @@ Open any of them and read it. A skill is a folder with one file in it, `SKILL.md
 ## Ground rules
 
 - Never paste a password, an API key, or a sign-in code into the chat. Sign-ins happen in your browser.
-- Keep private things out of this folder, or in `.aibl-local/`, which never goes to GitHub. Job folders under `runs/` and your raw voice samples at `work/course/staff/voice-samples.md` also stay on this computer. Course progress and approved source lists can still be saved. These ignore rules protect new files; a file already tracked by Git stays tracked. The checkpoint stops if it finds one of these local-only records tracked, so you can review it before another push. Earlier remote copies remain there until you decide how to handle them.
+- Keep private things out of this folder, or in `.aibl-local/`, which never goes to GitHub. Job folders under `runs/`, mail attachments held in `quarantine/`, logs, saved original emails under `library/originals/`, your voice samples and voice package in `work/course/staff/`, account records (`*-accounts.yaml`) and your agents' local notes also stay on this computer. If your workbench is older than these rules, `aibl-update` offers to add the missing lines. Course progress and approved source lists can still be saved. These ignore rules protect new files; a file already tracked by Git stays tracked. The checkpoint stops if it finds one of these local-only records tracked, so you can review it before another push. Earlier remote copies remain there until you decide how to handle them.
 - If something breaks, stop and take a screenshot. Ask the agent what it is before you click.
 
 ## When a program starts, and when it changes
