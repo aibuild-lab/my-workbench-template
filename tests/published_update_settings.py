@@ -159,7 +159,7 @@ class PublishedUpdateThenSettings(unittest.TestCase):
         # The new aibl-update, now the one on disk, runs its settings step even with nothing pending.
         new = (self.wb / ".claude/skills/aibl-update/SKILL.md").read_text(encoding="utf-8")
         self.assertIn("even when step 4 finds zero pending program commits", new)
-        self.assertIn("read the new `SKILL.md` now and follow it from step 3", new)
+        self.assertIn("read the new `SKILL.md` now and follow it from step 2.5", new)
         merge = lambda *a: subprocess.run(["node", "workforce/house/settings-merge.mjs", *a], cwd=self.wb, capture_output=True,
                                           text=True, timeout=60)
         before = (self.wb / ".claude/settings.json").read_bytes()
