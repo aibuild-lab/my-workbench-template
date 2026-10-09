@@ -29,8 +29,8 @@ Its reviewed paths are `course/team-hq/`, `team-hq/`, the exact entry-skill fold
 `.claude/skills/aibl-team-hq/` and `.agents/skills/aibl-team-hq/`, Team HQ's own
 `.claude/agents/aibl-team-hq-*.md` files, and the exact stamp
 `.aibl/programs/agent-team-hq.json`. The only personal-folder exception is
-`work/team-hq/.gitignore`, containing exactly `*` and `!.gitignore` on separate
-lines, so new practice outputs stay local. No other `work/` file is allowed.
+`work/team-hq/.gitignore`, whose only non-comment ignore rules are `*` and
+`!.gitignore` on separate lines, so new practice outputs stay local. No other `work/` file is allowed.
 Reject a different seed, symlinks, submodules, destination symlink ancestors,
 ignored/untracked collisions, root instructions/settings and core skill changes.
 An existing student ignore file is a collision: recommend keep mine, never
