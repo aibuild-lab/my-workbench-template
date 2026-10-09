@@ -57,3 +57,12 @@ Same folder, same route. Once your membership opens your access, run
 skills the Lab supplies, and one record under `.aibl/programs/`. Start a new
 session in this folder and run `aibl-lab`. New drops arrive through `aibl-update`.
 If your membership ends, what you already have stays; new drops stop arriving.
+
+## Team HQ source candidate
+
+Team HQ is being prepared for this same Essentials workbench. Its enrollment
+destination is held until the course team approves and publishes a student
+repository and branch. The enrollment skill records its exact candidate paths
+and collision protections; it does not yet list Team HQ as an available program.
+Do not connect the private Internal authoring repository. Existing programs keep
+using `aibl-enroll` and `aibl-update`.

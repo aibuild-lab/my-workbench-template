@@ -7,6 +7,8 @@ description: Show available workbench and program changes, preserve your customi
 
 Use the existing workbench. Program updates come from each approved remote's `student` branch. Commit messages are release notes. Enrollment and package-to-Git adoption use `aibl-enroll` first.
 
+Team HQ remains held under `aibl-enroll`'s Team HQ candidate contract. It is not a connected program until an approved student destination is published and added to the supported route. Never use Internal source as its update remote.
+
 ## Steps
 
 1. **Check location and work.** Follow `aibl-enroll` step 1 to verify the workbench and private origin. `git status --porcelain --untracked-files=all` must be empty. Otherwise stop for `aibl-checkpoint`; never stash, discard, or reset. Record the starting commit for recovery.
