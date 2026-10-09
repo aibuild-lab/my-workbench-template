@@ -16,6 +16,36 @@ A program joins the Essentials `my-workbench` you already own. No second workben
 
 If the retained installer's `course-options.json` has an `enrollment` object for the selected program, check its `repository` and `branch` against this table. A disagreement stops for course-team review. If that object is absent, use this table. The old `publisher`, `release_product`, and `adopt_skill` fields describe historical package delivery, not this Git route. Never rewrite a retained installer or package receipt.
 
+## Team HQ candidate contract
+
+Team HQ (`agent-team-hq`) is a source candidate, not a current enrollment destination.
+Stop before adding its remote or fetching it until the course team publishes an
+approved student repository and branch and this destination table is updated.
+Never fetch the private Internal authoring repository for student enrollment.
+The candidate uses this existing preview, approve and Git merge route; it does
+not add a package updater or run `team-hq/prepare_workbench.py` after enrollment.
+
+Its reviewed paths are `course/team-hq/`, `team-hq/`, the exact entry-skill folders
+`.claude/skills/aibl-team-hq/` and `.agents/skills/aibl-team-hq/`, Team HQ's own
+`.claude/agents/aibl-team-hq-*.md` files, and the exact stamp
+`.aibl/programs/agent-team-hq.json`. The only personal-folder exception is
+`work/team-hq/.gitignore`, whose only non-comment ignore rules are `*` and
+`!.gitignore` on separate lines, so new practice outputs stay local. No other `work/` file is allowed.
+Reject a different seed, symlinks, submodules, destination symlink ancestors,
+ignored/untracked collisions, root instructions/settings and core skill changes.
+An existing student ignore file is a collision: recommend keep mine, never
+replace it silently. Check previously tracked practice outputs separately;
+the seed does not remove their earlier commits.
+
+Use the same clean-worktree check, exact reviewed revision and collision choices
+as steps 1, 4, 5 and 6. On repeat enrollment, an already-merged revision needs no
+merge. Updates compare this program's stamp and student edits, including deleted
+supplied files, before approval. Modified supplied files require explicit choices;
+a canceled conflicting merge uses `git merge --abort` to preserve student history.
+Team HQ starts with `aibl-team-hq` in the same project. Do not offer Workforce's
+team renderer, settings merge, home registration or global agent-menu sync for
+this candidate. Project-native discovery remains a separate learner check.
+
 ## Steps
 
 1. **Check the folder and unfinished work before changing anything.** Run `git rev-parse --show-toplevel`, `git remote get-url origin`, and `gh api user --jq .login`. Confirm this is the student's workbench, with a private GitHub origin owned by that account (`gh repo view <owner/repo> --json nameWithOwner,isPrivate`). Accept the normal HTTPS or SSH spelling of that exact repository. A wrong folder, unknown ownership, public origin, symlinked workbench, or missing setup stops here. Run `git status --porcelain --untracked-files=all`; any output stops for the student to checkpoint. Never stash, discard, or rerun setup. Missing skills on an older workbench use the official installer `UPDATE-PROMPT.md`, not a new installation.
