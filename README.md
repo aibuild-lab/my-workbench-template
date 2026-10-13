@@ -49,6 +49,14 @@ student branch and asks about differences before joining. Keep the old receipts;
 future course updates use `aibl-update`, not package repair. It reports changes,
 preserves settings and personal work, and asks before applying anything.
 
+## From Essentials to Agent Team HQ
+
+Same folder, same route. When your workshop access opens, run `aibl-enroll`
+and choose Agent Team HQ. It comes from `aibuild-lab/agent-team-hq`, branch
+`student`, and adds a `team-hq/` folder, the workshop's agents and skills, and
+one record under `.aibl/programs/`. Start a new session in this folder and run
+`aibl-team-hq`. Updates arrive through `aibl-update`.
+
 ## From Essentials to The Lab
 
 Same folder, same route. Once your membership opens your access, run
