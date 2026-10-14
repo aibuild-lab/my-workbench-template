@@ -147,6 +147,19 @@ class TeamHQ(unittest.TestCase):
             self.assertIn("A program not in this list stops before merging.", text)
         self.assertEqual(ENROLL[0].read_bytes(), ENROLL[1].read_bytes())
 
+    def test_overlap_cost_is_said_honestly_in_both_apps(self):
+        # B1 (rehearsal 88c39b3c): keeping the Workforce copies leaves the Workforce Professor, which teaches
+        # Workforce lessons and never reads team-hq/. The cost line must say so and point at aibl-team-hq.
+        update = [ROOT / d / "skills" / "aibl-update" / "SKILL.md" for d in (".claude", ".agents")]
+        for skill in ENROLL + update:
+            text = skill.read_text()
+            self.assertNotIn("the Team HQ lessons still work with them", text, skill)
+            self.assertIn("teaches the Agent Workforce lessons", text, skill)
+            self.assertIn("the `aibl-team-hq` skill", text, skill)
+        enroll = ENROLL[0].read_text()
+        self.assertIn("does not read the Team HQ lessons", enroll)
+        self.assertIn("Never say the Team HQ lessons work through the Workforce helpers.", enroll)
+
     def test_update_skill_knows_team_hq_in_both_apps(self):
         claude, codex = (ROOT / d / "skills" / "aibl-update" / "SKILL.md" for d in (".claude", ".agents"))
         self.assertEqual(claude.read_bytes(), codex.read_bytes())
