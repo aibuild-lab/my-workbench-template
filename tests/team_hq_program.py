@@ -27,6 +27,10 @@ HQ_AGENTS = ["aibl-echo.md", "aibl-librarian.md", "aibl-scratch.md", "aibl-the-p
 HQ_PREFIXES = ("team-hq/", ".claude/agents/", ".codex/agents/", ".claude/skills/", ".agents/skills/")
 HQ_EXACT = {".aibl/programs/agent-team-hq.json", ".aibl/course-agents.json"}
 CORE_SKILLS = ("aibl-personalize", "aibl-checkpoint", "aibl-enroll", "aibl-update")
+STEP_4_PATHS = ("Agent Team HQ: `team-hq/`, `.claude/agents/`, `.codex/agents/`, `.claude/skills/`, `.agents/skills/`, "
+                "the one exact stamp `.aibl/programs/agent-team-hq.json`, and the program's list of its agents "
+                "`.aibl/course-agents.json`.")
+WORKFORCE = "https://github.com/aibuild-lab/agent-workforce.git"
 
 
 def allowed(path):
@@ -89,16 +93,56 @@ class TeamHQ(unittest.TestCase):
                  "+student:refs/remotes/agent-team-hq/student")
         return wb
 
+    def workforce_course(self):
+        """A throwaway Workforce student branch whose five shared agents differ from Team HQ's."""
+        wf = self.base / "agent-workforce"
+        for name in HQ_AGENTS + ["aibl-chief-of-staff.md"]:
+            self.write(wf / ".claude" / "agents" / name, f"---\nname: {name[:-3]}\n---\n{name} workforce\n".encode())
+        self.write(wf / ".aibl" / "programs" / "agent-workforce.json", b"{}\n")
+        self.git(wf, "init", "-q", "-b", "student")
+        course_list.write(wf)
+        self.commit(wf, "Agent Workforce student edition")
+        return wf
+
     def hook(self, wb, *args):
         p = subprocess.run(["node", str(HOOK), *args], text=True, capture_output=True,
                            env=dict(self.env, CLAUDE_PROJECT_DIR=str(wb)), cwd=str(wb))
         self.assertEqual(p.returncode, 0, p.stderr)
         return json.loads(p.stdout)
 
+    def test_workforce_after_team_hq_offers_the_workforce_helpers_as_course_copies(self):
+        # Team HQ first, its helpers placed in the agent menu; then Workforce, taking the program's copies
+        # of the shared files as step 4 recommends. The menu's Team HQ copies are course copies
+        # ("changed", replaced on the one offer), never "edited", which would ask about each one.
+        wb = self.workbench()
+        self.git(wb, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "merge", "-q",
+                 "--allow-unrelated-histories", "--no-ff", "-m", "Add Agent Team HQ", "agent-team-hq/student")
+        preview = self.hook(wb, "--agent-menu")
+        applied = self.hook(wb, "--agent-menu-apply", "--expect", preview["preview_sha256"])
+        self.assertEqual(applied["status"], "in_step")
+        self.assertEqual(sorted(p.name for p in (self.home / ".claude" / "agents").iterdir()), HQ_AGENTS)
+        wf = self.workforce_course()
+        self.git(wb, "remote", "add", "agent-workforce", WORKFORCE)
+        self.git(wb, "-c", f"url.{wf}.insteadOf={WORKFORCE}", "fetch", "-q", "agent-workforce",
+                 "+student:refs/remotes/agent-workforce/student")
+        subprocess.run(["git", "-C", str(wb), "merge", "-q", "--allow-unrelated-histories", "--no-ff", "--no-commit",
+                        "agent-workforce/student"], capture_output=True)
+        conflicts = self.git(wb, "diff", "--name-only", "--diff-filter=U").decode().split()
+        self.assertEqual(sorted(conflicts), sorted([".aibl/course-agents.json"] + [f".claude/agents/{n}" for n in HQ_AGENTS]))
+        self.git(wb, "checkout", "--theirs", "--", *conflicts)
+        self.git(wb, "add", "--", *conflicts)
+        self.git(wb, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "Add Agent Workforce")
+        menu = self.hook(wb, "--agent-menu")
+        self.assertEqual(menu["edited"], [])
+        self.assertEqual(sorted(menu["changed"]), HQ_AGENTS)
+        self.assertEqual(menu["missing"], ["aibl-chief-of-staff.md"])
+
     def test_skill_lists_team_hq_in_both_apps(self):
         for skill in ENROLL:
             text = skill.read_text()
             self.assertIn("| Agent Team HQ | agent-team-hq | https://github.com/aibuild-lab/agent-team-hq.git | student | aibl-team-hq |", text)
+            # the test's allowed() below restates exactly this sentence of step 4
+            self.assertIn(STEP_4_PATHS, text)
             self.assertIn("`.aibl/programs/agent-team-hq.json`", text)
             self.assertIn("A program not in this list stops before merging.", text)
         self.assertEqual(ENROLL[0].read_bytes(), ENROLL[1].read_bytes())
