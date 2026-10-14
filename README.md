@@ -49,6 +49,21 @@ student branch and asks about differences before joining. Keep the old receipts;
 future course updates use `aibl-update`, not package repair. It reports changes,
 preserves settings and personal work, and asks before applying anything.
 
+## From Essentials to Agent Team HQ
+
+Same folder, same route. If your workbench was set up before Agent Team HQ
+opened, get the newest workbench skills first: run `aibl-update` and say yes to
+the new workbench skills, or use the official
+[update prompt](https://github.com/aibuild-lab/aibl-installer/blob/main/START-HERE.md#later-update-your-workbench).
+When your workshop access opens, run `aibl-enroll` and choose Agent Team HQ.
+It comes from `aibuild-lab/agent-team-hq`, branch `student`, and adds a
+`team-hq/` folder, the workshop's five helpers and skills, a record under
+`.aibl/programs/` and the course's list of its helpers in `.aibl/`. Start a new
+session in this folder and run `aibl-team-hq`. Updates arrive through
+`aibl-update`. Already in Agent Workforce? Five helpers share names with
+Workforce's. Enrollment shows those files together and recommends keeping your
+Workforce copies.
+
 ## From Essentials to The Lab
 
 Same folder, same route. Once your membership opens your access, run

@@ -42,8 +42,8 @@ const MARKER_DIR = path.join(os.tmpdir(), "aibl-workbench-update-check");
 const MARKER_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const GIT_TIMEOUT_MS = Number(process.env.AIBL_UPDATE_CHECK_TIMEOUT_MS || 20000);
 const PROGRAM_BRANCH = "student";
-const PROGRAMS = new Set(["agent-workforce", "the-lab"]);
-const LABELS = { "agent-workforce": "Agent Workforce", "the-lab": "The Lab" };
+const PROGRAMS = new Set(["agent-workforce", "the-lab", "agent-team-hq"]);
+const LABELS = { "agent-workforce": "Agent Workforce", "the-lab": "The Lab", "agent-team-hq": "Agent Team HQ" };
 // A program's own settings merge script, run with no arguments for a read-only JSON preview
 // (status, adds[{where, value}]). The contract is the program's: agent-native-workforce-internal,
 // workforce/house/settings-merge.mjs and its tests/test_program_settings.py.
