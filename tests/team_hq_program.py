@@ -156,9 +156,11 @@ class TeamHQ(unittest.TestCase):
             self.assertNotIn("the Team HQ lessons still work with them", text, skill)
             self.assertIn("teaches the Agent Workforce lessons", text, skill)
             self.assertIn("the `aibl-team-hq` skill", text, skill)
-        enroll = ENROLL[0].read_text()
-        self.assertIn("does not read the Team HQ lessons", enroll)
-        self.assertIn("Never say the Team HQ lessons work through the Workforce helpers.", enroll)
+        for skill in ENROLL:
+            enroll = skill.read_text()
+            self.assertIn("does not read the Team HQ lessons", enroll, skill)
+            self.assertIn("Never say the Team HQ Professor or helpers are installed when the Workforce copies were kept.",
+                          enroll, skill)
 
     def test_update_skill_knows_team_hq_in_both_apps(self):
         claude, codex = (ROOT / d / "skills" / "aibl-update" / "SKILL.md" for d in (".claude", ".agents"))
