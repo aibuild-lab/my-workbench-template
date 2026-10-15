@@ -8,7 +8,7 @@
   "audience": "student",
   "privacy_class": "aibl_internal",
   "owner": "AIBL Education Team",
-  "accountable_owner_slug": "aibl-education",
+  "accountable_owner_slug": "aibl-education-team",
   "human_entry_points": [
     {
       "label": "Repository guide",
