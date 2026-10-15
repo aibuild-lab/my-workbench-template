@@ -1,0 +1,37 @@
+{
+  "schema_version": "aibl.repository-descriptor/v2",
+  "id": "repo.my-workbench-template",
+  "display_name": "My Workbench template",
+  "repository": "aibuild-lab/my-workbench-template",
+  "authority_scope": "Owns the generic student-owned workbench starter and supplied core skills. It does not own personal workbench content, private context, credentials or enrolled course releases.",
+  "lifecycle": "current",
+  "audience": "student",
+  "privacy_class": "aibl_internal",
+  "owner": "AIBL Education Team",
+  "accountable_owner_slug": "aibl-education-team",
+  "human_entry_points": [
+    {
+      "label": "Repository guide",
+      "path": "README.md"
+    }
+  ],
+  "agent_entry_points": [
+    {
+      "id": "repository-guide",
+      "kind": "instructions",
+      "purpose": "Read the repository contract before acting; discovery grants no execution authority",
+      "path": "AGENTS.md",
+      "status": "active",
+      "effect_class": "read_only",
+      "approval_class": "none"
+    }
+  ],
+  "review": {
+    "reviewed_at": "2026-10-15",
+    "cadence_days": 90
+  },
+  "roadmap_refs": [],
+  "replacement_ref": null,
+  "notes": "Catalog metadata reviewed during the October 15 cleanup under delegated authority. Source, publication, installation, activation and acceptance remain separate. No secrets, raw transcripts or private runtime evidence belong in this descriptor.",
+  "extensions": {}
+}
