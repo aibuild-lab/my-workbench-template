@@ -14,6 +14,8 @@
 *.log
 /library/originals/
 /work/course/staff/voice*
+# Agent Team HQ: your voice samples and Echo's voice readings stay on this computer, like the Workforce voice files above.
+/work/team-hq/voice/
 **/*-accounts.yaml
 /.claude/agent-memory-local/
 **/.claude/settings.local.json
