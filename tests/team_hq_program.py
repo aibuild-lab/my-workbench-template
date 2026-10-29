@@ -21,7 +21,10 @@ ENROLL = [ROOT / ".claude" / "skills" / "aibl-enroll" / "SKILL.md", ROOT / ".age
 OFFICIAL = "https://github.com/aibuild-lab/agent-team-hq.git"
 PUBLISHED_ENV = "AIBL_PUBLISHED_E8E36A38"
 PUBLISHED_REVISION = "e8e36a38a308e22ddc7d3cbd209560bd5633324a"
-HQ_AGENTS = ["aibl-echo.md", "aibl-librarian.md", "aibl-scratch.md", "aibl-the-professor.md", "aibl-ygm.md"]
+# The current edition ships six (aibl-riff joined after the first); all six share Agent Workforce's names.
+HQ_AGENTS = ["aibl-echo.md", "aibl-librarian.md", "aibl-riff.md", "aibl-scratch.md", "aibl-the-professor.md", "aibl-ygm.md"]
+# The first published edition, e8e36a38, shipped five; the published-edition checks below pin it.
+PUBLISHED_AGENTS = [n for n in HQ_AGENTS if n != "aibl-riff.md"]
 
 # Step 4's reviewed paths for Agent Team HQ, as the skill states them.
 HQ_PREFIXES = ("team-hq/", ".claude/agents/", ".codex/agents/", ".claude/skills/", ".agents/skills/")
@@ -41,12 +44,14 @@ def allowed(path):
 
 
 class TeamHQ(unittest.TestCase):
+    agents = HQ_AGENTS
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.base = Path(self.temp.name)
         self.home = self.base / "home"
         self.course = self.base / "agent-team-hq"
-        for name in HQ_AGENTS:
+        for name in self.agents:
             self.write(self.course / ".claude" / "agents" / name, f"---\nname: {name[:-3]}\n---\n{name} hq\n".encode())
             self.write(self.course / ".codex" / "agents" / (name[:-3] + ".toml"), f'name = "{name[:-3]}"\n'.encode())
         for d in (".claude", ".agents"):
@@ -94,9 +99,9 @@ class TeamHQ(unittest.TestCase):
         return wb
 
     def workforce_course(self):
-        """A throwaway Workforce student branch whose five shared agents differ from Team HQ's."""
+        """A throwaway Workforce student branch whose six shared agents differ from Team HQ's."""
         wf = self.base / "agent-workforce"
-        for name in HQ_AGENTS + ["aibl-chief-of-staff.md"]:
+        for name in self.agents + ["aibl-chief-of-staff.md"]:
             self.write(wf / ".claude" / "agents" / name, f"---\nname: {name[:-3]}\n---\n{name} workforce\n".encode())
         self.write(wf / ".aibl" / "programs" / "agent-workforce.json", b"{}\n")
         self.git(wf, "init", "-q", "-b", "student")
@@ -120,7 +125,7 @@ class TeamHQ(unittest.TestCase):
         preview = self.hook(wb, "--agent-menu")
         applied = self.hook(wb, "--agent-menu-apply", "--expect", preview["preview_sha256"])
         self.assertEqual(applied["status"], "in_step")
-        self.assertEqual(sorted(p.name for p in (self.home / ".claude" / "agents").iterdir()), HQ_AGENTS)
+        self.assertEqual(sorted(p.name for p in (self.home / ".claude" / "agents").iterdir()), self.agents)
         wf = self.workforce_course()
         self.git(wb, "remote", "add", "agent-workforce", WORKFORCE)
         self.git(wb, "-c", f"url.{wf}.insteadOf={WORKFORCE}", "fetch", "-q", "agent-workforce",
@@ -128,13 +133,13 @@ class TeamHQ(unittest.TestCase):
         subprocess.run(["git", "-C", str(wb), "merge", "-q", "--allow-unrelated-histories", "--no-ff", "--no-commit",
                         "agent-workforce/student"], capture_output=True)
         conflicts = self.git(wb, "diff", "--name-only", "--diff-filter=U").decode().split()
-        self.assertEqual(sorted(conflicts), sorted([".aibl/course-agents.json"] + [f".claude/agents/{n}" for n in HQ_AGENTS]))
+        self.assertEqual(sorted(conflicts), sorted([".aibl/course-agents.json"] + [f".claude/agents/{n}" for n in self.agents]))
         self.git(wb, "checkout", "--theirs", "--", *conflicts)
         self.git(wb, "add", "--", *conflicts)
         self.git(wb, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "Add Agent Workforce")
         menu = self.hook(wb, "--agent-menu")
         self.assertEqual(menu["edited"], [])
-        self.assertEqual(sorted(menu["changed"]), HQ_AGENTS)
+        self.assertEqual(sorted(menu["changed"]), self.agents)
         self.assertEqual(menu["missing"], ["aibl-chief-of-staff.md"])
 
     def test_skill_lists_team_hq_in_both_apps(self):
@@ -201,13 +206,14 @@ class TeamHQ(unittest.TestCase):
         wb = self.workbench()
         self.git(wb, "merge", "--allow-unrelated-histories", "--no-ff", "-m", "Add Agent Team HQ", "agent-team-hq/student")
         menu = self.hook(wb, "--agent-menu")
-        self.assertEqual(sorted(menu["missing"]), HQ_AGENTS)
+        self.assertEqual(sorted(menu["missing"]), self.agents)
 
 
 @unittest.skipUnless(os.environ.get(PUBLISHED_ENV),
                      f"set {PUBLISHED_ENV} to a checkout of aibuild-lab/agent-team-hq at e8e36a38")
 class PublishedTeamHQ(TeamHQ):
     """Every TeamHQ test again, on the real published edition instead of the synthetic one."""
+    agents = PUBLISHED_AGENTS
 
     def setUp(self):
         super().setUp()
@@ -233,7 +239,7 @@ class PublishedTeamHQ(TeamHQ):
     def test_every_agent_has_a_codex_twin(self):
         tree = set(self.git(self.course, "ls-tree", "-r", "--name-only", PUBLISHED_REVISION).decode().split())
         agents = sorted(p.rsplit("/", 1)[-1] for p in tree if p.startswith(".claude/agents/"))
-        self.assertEqual(agents, HQ_AGENTS)
+        self.assertEqual(agents, self.agents)
         for name in agents:
             self.assertIn(f".codex/agents/{name[:-3]}.toml", tree, name)
 
@@ -242,7 +248,7 @@ class PublishedTeamHQ(TeamHQ):
         clone = self.base / "edition"
         self.git(self.base, "clone", "-q", "--branch", "student", str(self.course), str(clone))
         self.assertEqual(shipped, course_list.build(clone))
-        self.assertEqual(sorted(shipped["agents"]), HQ_AGENTS)
+        self.assertEqual(sorted(shipped["agents"]), self.agents)
         self.assertTrue(all(e["status"] == "current" for e in shipped["agents"].values()))
 
     def test_stamp_names_the_program_and_counts_the_tree(self):
