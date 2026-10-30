@@ -303,7 +303,10 @@ function hook() {
   if (!root) return;
   if (!claimThisConversation(payload.session_id, root)) return;
   const report = check(root);
-  const sentences = [describe(report), describeAgentMenu(agentMenu(root))].filter(Boolean);
+  // The @ agent menu is Claude's. Codex runs this same script from .codex/hooks.json and has no such menu,
+  // so the menu line is only for Claude, which sets CLAUDE_PROJECT_DIR for its hooks (Codex does not).
+  const menuLine = process.env.CLAUDE_PROJECT_DIR ? describeAgentMenu(agentMenu(root)) : null;
+  const sentences = [describe(report), menuLine].filter(Boolean);
   if (sentences.length) emit(sentences.join(" "));
 }
 
