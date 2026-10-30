@@ -478,9 +478,11 @@ class Words(unittest.TestCase):
             self.assertIn("python3 workforce/runtime/start_fresh.py check", text)
             self.assertIn("Ask only when its `state` is `returning_v1`", text)
             self.assertIn(
-                "\"One question, and I'll only ask it once. This update brings the new version of Agent Workforce. "
-                "Would you like to take it from the beginning? Your first run is saved in a dated folder first, and "
-                "nothing is deleted. Or keep going as you are; that's completely fine and changes nothing. "
+                "\"One question, and I'll only ask it once. This update brings the new version of Agent Workforce, "
+                "and the course has changed a lot since your first run: new lessons, in a new order, with new pages "
+                "on Learn. Would you like to take it from the beginning? Your first run is saved in a dated folder "
+                "first, and nothing is deleted. Or keep going as you are; that's fine too, and the lessons you open "
+                "from here on will be the new version either way. "
                 "1. Yes, start from the beginning 2. No, keep going as I am\"", text)
             self.assertIn("python3 workforce/runtime/start_fresh.py answer yes --via update", text)
             self.assertIn("python3 workforce/runtime/start_fresh.py answer not-now --via update", text)
