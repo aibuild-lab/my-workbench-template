@@ -12,6 +12,10 @@
 //     Code agent menu" below); the hook adds one line when they are not.
 //   node .claude/hooks/update-check.mjs --home-workbench [--home-workbench-apply]
 //     whether ~/.aibl/workbench.json records this workbench as the home workbench.
+//   node .claude/hooks/update-check.mjs --joining-from
+//     read only: signs that the student is joining from Agent Team HQ (in this workbench)
+//     or from Agent Native Camp (beside it), which aibl-enroll step 1 reads to say the right
+//     thing. See "Where the student is joining from" below.
 //
 //   Team settings: a program never ships .claude/settings.json. A program that has settings of its
 //   own ships a merge script (PROGRAM_SETTINGS below); the check runs that script's read-only preview
@@ -204,6 +208,9 @@ const LEGACY_EDITION = {
 // opened outside this workbench still has them (workforce-internal #98).
 const COURSE_SKILLS = ["aibl-bridge", "aibl-bridge-setup"];
 const HOME_POINTER_SCHEMA = "aibl.home-workbench/v1";
+// "Where the student is joining from" (declared up here because main() runs below)
+const CAMP_ID = "repo.agent-native-camp";
+const NIGHT_SHIFT = "aibl-hq-night-shift";
 const PLACED_SCHEMA = "aibl.agent-menu-placed/v2";
 const WINDOWS = process.platform === "win32";
 // Mac and Windows folders ignore letter case, so paths are compared the same way there.
@@ -223,6 +230,8 @@ function main() {
       const root = resolveRoot({});
       const report = root ? homeWorkbench(root) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--joining-from")) {
+      process.stdout.write(JSON.stringify(joiningFrom(), null, 2) + "\n");
     } else if (process.argv.includes("--agent-menu-apply")) {
       const root = resolveRoot({});
       const report = root ? applyAgentMenu(root, replaceEditedArgs(), argValue("--expect")) : { status: "not_a_workbench" };
@@ -1542,6 +1551,102 @@ function applyHomeWorkbench(root) {
     return { ...homeWorkbench(root), applied: false, error: error.code || "write_failed", previous: before.recorded };
   }
   return { ...homeWorkbench(root), applied: true, previous: before.recorded };
+}
+
+// ---------------------------------------------------------------------------
+// Where the student is joining from
+// ---------------------------------------------------------------------------
+//
+// aibl-enroll step 1 reads this so it can say the right thing to two groups (Wonderboy,
+// Workforce/v2/Joining-Workforce-Guides-10-30-2026.md, "What should move into the installer and
+// template"):
+//   Agent Team HQ graduates: the program's stamp or folders in this workbench, and a night shift
+//     (the hq-schedule skill's default job, aibl-hq-night-shift, kept in .aibl-local/schedule/,
+//     and on a Mac also a launchd file of the same name). The night shift rewrites tracked Team HQ
+//     files every morning, so enrolling should follow a fresh save.
+//   Agent Native Camp alumni: Camp's own clone at ~/GitHub/agent-native-camp holding its
+//     repository descriptor (Camp's diagnose-course-repo.mjs names that folder). ~/context-repo
+//     and ~/.hermes are weak signs only: many campers keep both on a server, so finding nothing
+//     proves nothing, and finding them is a reason to ask, never to assume.
+// It only looks. It never opens a file other than Camp's small descriptor, never lists a folder,
+// and never moves, copies or deletes anything. Paths in the report are for the agent, not the
+// student.
+
+function campDescriptor(folder) {
+  // "camp" when the folder's .aibl/repository.json names Camp, "other" when it names something
+  // else or cannot be read, null when there is none. Read only, and only a small file.
+  const file = path.join(folder, ".aibl", "repository.json");
+  try {
+    const info = fs.statSync(file);
+    if (!info.isFile() || info.size > 64 * 1024) return "other";
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && parsed.id === CAMP_ID ? "camp" : "other";
+  } catch (error) {
+    return error && error.code === "ENOENT" ? null : "other";
+  }
+}
+
+function isFolder(target) {
+  try { return fs.statSync(target).isDirectory(); } catch { return false; }
+}
+
+function teamHqSigns(root) {
+  const signs = [];
+  if (isRealFile(path.join(root, ".aibl", "programs", "agent-team-hq.json"))) signs.push(".aibl/programs/agent-team-hq.json");
+  if (isRealFile(path.join(root, "team-hq", "CONTENTS.md"))) signs.push("team-hq/CONTENTS.md");
+  if (isFolder(path.join(root, "work", "team-hq"))) signs.push("work/team-hq/");
+  if (git(root, ["remote", "get-url", "agent-team-hq"])) signs.push("remote agent-team-hq");
+  const nightShift = [];
+  if (isFolder(path.join(root, ".aibl-local", "schedule", NIGHT_SHIFT))) nightShift.push(`.aibl-local/schedule/${NIGHT_SHIFT}/`);
+  if (process.platform === "darwin" &&
+      isRealFile(path.join(os.homedir(), "Library", "LaunchAgents", `${NIGHT_SHIFT}.plist`))) {
+    nightShift.push(`~/Library/LaunchAgents/${NIGHT_SHIFT}.plist`);
+  }
+  return {
+    found: signs.length > 0,
+    signs,
+    night_shift: nightShift.length > 0,
+    night_shift_signs: nightShift,
+    work_folder: isFolder(path.join(root, "work", "team-hq")),
+  };
+}
+
+function campSigns() {
+  const home = os.homedir();
+  const folder = path.join(home, "GitHub", "agent-native-camp");
+  const signs = [];
+  const weak = [];
+  let found = "not_seen";
+  if (isFolder(folder)) {
+    const descriptor = campDescriptor(folder);
+    if (descriptor === "camp") {
+      found = "yes";
+      signs.push("~/GitHub/agent-native-camp with repo.agent-native-camp");
+    } else {
+      found = "ask";
+      weak.push("~/GitHub/agent-native-camp without Camp's descriptor");
+    }
+  }
+  if (isFolder(path.join(home, "context-repo"))) weak.push("~/context-repo");
+  if (isFolder(path.join(home, ".hermes"))) weak.push("~/.hermes");
+  if (found === "not_seen" && weak.length) found = "ask";
+  return { found, folder: found === "yes" ? folder : null, signs, weak_signs: weak };
+}
+
+function joiningFrom() {
+  // A Camp folder opened by mistake is the one case that is not a workbench and still matters.
+  const top = git(process.cwd(), ["rev-parse", "--show-toplevel"]);
+  if (top && campDescriptor(top) === "camp") {
+    return { status: "camp_folder", folder: path.resolve(top), groups: ["camp"] };
+  }
+  const root = resolveRoot({});
+  if (!root) return { status: "not_a_workbench" };
+  const teamHq = teamHqSigns(root);
+  const camp = campSigns();
+  const groups = [];
+  if (teamHq.found) groups.push("team_hq");
+  if (camp.found === "yes") groups.push("camp");
+  return { status: "ok", workbench: path.resolve(root), groups, team_hq: teamHq, camp };
 }
 
 // ---------------------------------------------------------------------------
