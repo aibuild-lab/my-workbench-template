@@ -20,7 +20,11 @@ What it pins:
   - The Camp question is asked at most once, ever: camp.next is "say", "ask" or "none", and
     ~/.aibl/camp.json (written by --camp-record, or by the installer's hub_setup.py in the same
     shape) turns it to "none" for good. A strong sign never asks.
-  - The report only looks: no file in the home folder or the workbench is added, changed or removed.
+  - On a strong sign whose line was never said ("say"), the report writes ~/.aibl/camp.json itself
+    (decision 9 of the 10-30 friction pass), so there is no separate command an agent could turn into
+    a question; a rerun says "none".
+  - Otherwise the report only looks: no file in the home folder or the workbench is added, changed or
+    removed, and on a strong sign the Camp record is the only change.
   - Both apps' copies of aibl-enroll and aibl-update say the same, and say the agreed words.
 """
 import json, os, shutil, stat, subprocess, sys, tempfile, unittest
@@ -368,14 +372,34 @@ class JoiningFrom(unittest.TestCase):
 
     def test_strong_sign_says_once_and_never_asks(self):
         self.camp_clone()
-        self.assertEqual(self.report()["camp"]["next"], "say")
-        r = self.record("yes")
-        self.assertTrue(r["applied"])
+        camp = self.report()["camp"]
+        self.assertEqual((camp["next"], camp["recorded"]), ("say", True))
+        # The report noted the line itself: nothing for the agent to run or ask afterwards.
         saved = json.loads((self.home / ".aibl" / "camp.json").read_text(encoding="utf-8"))
         self.assertEqual((saved["schema"], saved["took_camp"], saved["told"], saved["by"]),
                          ("aibl.camp-answer/v1", True, True, "aibl-enroll"))
         for _ in range(2):  # a second enroll, a third
-            self.assertEqual(self.report()["camp"]["next"], "none")
+            camp = self.report()["camp"]
+            self.assertEqual(camp["next"], "none")
+            self.assertNotIn("recorded", camp)
+
+    def test_a_broken_record_counts_as_told_and_a_clear_place_gets_the_record(self):
+        self.camp_clone()
+        (self.home / ".aibl").mkdir(parents=True, exist_ok=True)
+        (self.home / ".aibl" / "camp.json").mkdir()   # a folder in the record's place: the write fails
+        camp = self.report()["camp"]
+        self.assertEqual(camp["next"], "none")        # an unreadable record already counts as answered
+        shutil.rmtree(self.home / ".aibl" / "camp.json")
+        camp = self.report()["camp"]
+        self.assertEqual((camp["next"], camp["recorded"]), ("say", True))
+
+    def test_weak_and_no_sign_reports_write_nothing(self):
+        for layout in (lambda: self.context_repo(marker=False), self.week1_folder):
+            layout()
+            camp = self.report()["camp"]
+            self.assertEqual(camp["next"], "ask")
+            self.assertNotIn("recorded", camp)
+            self.assertFalse((self.home / ".aibl" / "camp.json").exists())
 
     def test_weak_sign_asks_once_whatever_the_answer(self):
         self.context_repo(marker=False)
@@ -418,7 +442,7 @@ class JoiningFrom(unittest.TestCase):
             self.assertFalse(r["applied"])
         self.assertFalse((self.home / ".aibl" / "camp.json").exists())
 
-    # --- it only looks ---------------------------------------------------------------------------
+    # --- it only looks, apart from the Camp record on a strong sign ------------------------------
 
     def test_report_changes_nothing(self):
         self.write(self.wb / "work" / "team-hq" / "north-star.md", "mine\n")
@@ -440,7 +464,13 @@ class JoiningFrom(unittest.TestCase):
         status_after = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"], cwd=self.wb,
                                       capture_output=True, text=True).stdout
         self.assertEqual(status_after, status_before)
-        self.assertEqual(after, before)
+        record = ".aibl/camp.json"
+        self.assertNotIn(record, before)
+        self.assertIn(record, after)                   # the strong sign's line, noted by the report
+        added = {k for k in after if k not in before}
+        self.assertTrue(added <= {".aibl", record}, added)
+        self.assertEqual({k: v for k, v in after.items() if k not in (".aibl", record)},
+                         {k: v for k, v in before.items() if k != ".aibl"})
 
 
 class Words(unittest.TestCase):
@@ -469,6 +499,23 @@ class Words(unittest.TestCase):
             "never retry it or ask the question again",
         ):
             self.assertIn(line, text)
+
+    def test_the_report_notes_the_camp_line_so_enroll_has_nothing_to_ask(self):
+        # Decision 9 (friction pass, 10-30): the agent bundled "Should I write the Camp note too?" into its
+        # first approval because the enroll prompt says "change nothing until I say yes".
+        for path in ENROLL:
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("The report has already noted, outside this workbench, that the line is said (`camp.recorded`)", text)
+            self.assertIn("nothing to ask, offer or mention about it, even when the student asked you to change nothing until they say yes", text)
+            self.assertNotIn("Then run `node .claude/hooks/update-check.mjs --camp-record yes` yourself", text)
+
+    def test_enroll_marks_the_course_run_and_names_edited_team_hq_agents(self):
+        for path in ENROLL:
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("python3 workforce/runtime/start_fresh.py mark-v2 --via enroll --commit", text)
+            self.assertIn("never ask about it, offer it or mention it, and leave it out of every summary", text)
+            self.assertIn("You changed <names> yourself. Taking the Workforce copies replaces your changes; the Technical "
+                          "Operator (Gigawatt) can add them back to the Workforce copy as owner notes later.", text)
 
     def test_update_asks_a_returning_student_once_from_the_course_check(self):
         # Wade, 10-30: one question, asked once, ever, only for returning_v1; the answer is saved

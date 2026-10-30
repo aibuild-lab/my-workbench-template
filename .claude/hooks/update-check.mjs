@@ -13,13 +13,15 @@
 //   node .claude/hooks/update-check.mjs --home-workbench [--home-workbench-apply]
 //     whether ~/.aibl/workbench.json records this workbench as the home workbench.
 //   node .claude/hooks/update-check.mjs --joining-from
-//     read only: signs that the student is joining from Agent Team HQ (in this workbench)
-//     or from Agent Native Camp (beside it), which aibl-enroll step 1 reads to say the right
-//     thing. See "Where the student is joining from" below.
+//     signs that the student is joining from Agent Team HQ (in this workbench) or from Agent
+//     Native Camp (beside it), which aibl-enroll step 1 reads to say the right thing. See "Where
+//     the student is joining from" below. It only looks, with one exception: on a verified Camp
+//     sign whose line was never said (camp.next "say"), it writes ~/.aibl/camp.json itself, so
+//     the line is said once and there is no separate command for an agent to turn into a question.
 //   node .claude/hooks/update-check.mjs --camp-record yes|no
 //     writes ~/.aibl/camp.json, the one record of the Camp line or question, so neither the
-//     installer nor aibl-enroll asks or says it again. aibl-enroll runs it only right after it said
-//     the Camp line or the student answered the Camp question.
+//     installer nor aibl-enroll asks or says it again. aibl-enroll runs it only right after the
+//     student answered the Camp question (a weak sign); a strong sign is recorded by --joining-from.
 //
 //   Team settings: a program never ships .claude/settings.json. A program that has settings of its
 //   own ships a merge script (PROGRAM_SETTINGS below); the check runs that script's read-only preview
@@ -30,7 +32,8 @@
 // Rules, borrowed from the Camp update check that ran for months:
 //   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
 //      Its only writes are --agent-menu-apply, --home-workbench-apply and --camp-record, outside
-//      the workbench, which aibl-update and aibl-enroll run only after the student's yes or answer.
+//      the workbench, which aibl-update and aibl-enroll run only after the student's yes or answer,
+//      and --joining-from's Camp record on a verified Camp sign (the line it is about to hear).
 //      The hook itself never writes.
 //   2. It never blocks a session: every path exits 0, and a broken check stays quiet.
 //   3. New conversations only. resume, compact and fork continue one that already heard
@@ -1607,7 +1610,11 @@ function applyHomeWorkbench(root) {
 //     and on Camp's own path Hermes runs under a separate campagent account, not in this home.
 //     Many campers keep Hermes and their agent's copy of context-repo on a server, so finding
 //     nothing proves nothing.
-// The report only looks; the one write is --camp-record, after the student heard or answered.
+// The report only looks, apart from one write: when it returns camp.next "say" (a verified sign, the
+// line never said), it writes ~/.aibl/camp.json itself (told: true, by aibl-enroll) and reports
+// camp.recorded, so a rerun says "none" and the agent has nothing to run or ask afterwards (an
+// enroll prompt that says "change nothing until I say yes" once turned that separate command into
+// a question, 10-30). The weak-sign answer is still written by --camp-record, after the answer.
 // It never lists a folder; it checks fixed paths, and the only files it opens are
 // three small ones Camp itself writes (the descriptor, a candidate clone's .git/config, and the
 // context-repo marker). It runs no Git command in a Camp folder, and it never moves, copies or
@@ -1784,6 +1791,12 @@ function joiningFrom() {
   if (!root) return { status: "not_a_workbench" };
   const teamHq = teamHqSigns(root);
   const camp = campSigns();
+  if (camp.next === "say") {
+    // The line is about to be said: note it now, so it is never said again and nothing is left to ask.
+    const written = recordCamp("yes");
+    camp.recorded = written.applied === true;
+    if (!written.applied) camp.record_error = written.error;
+  }
   const groups = [];
   if (teamHq.found) groups.push("team_hq");
   if (camp.found === "yes") groups.push("camp");
