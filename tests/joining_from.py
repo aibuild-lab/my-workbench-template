@@ -470,11 +470,25 @@ class Words(unittest.TestCase):
         ):
             self.assertIn(line, text)
 
-    def test_update_offers_start_fresh_only_from_the_course_check(self):
-        text = UPDATE[0].read_text(encoding="utf-8")
-        self.assertIn("python3 workforce/runtime/start_fresh.py check", text)
-        self.assertIn("You did a first run of the course. Want to start run two at Orientation?", text)
-        self.assertIn("don't run Start fresh here", text)
+    def test_update_asks_a_returning_student_once_from_the_course_check(self):
+        # Wade, 10-30: one question, asked once, ever, only for returning_v1; the answer is saved
+        # in the course's run file so no update, lesson or agent asks again.
+        for path in UPDATE:
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("python3 workforce/runtime/start_fresh.py check", text)
+            self.assertIn("Ask only when its `state` is `returning_v1`", text)
+            self.assertIn(
+                "\"One question, and I'll only ask it once. This update brings the new version of Agent Workforce. "
+                "Would you like to take it from the beginning? Your first run is saved in a dated folder first, and "
+                "nothing is deleted. Or keep going as you are; that's completely fine and changes nothing. "
+                "1. Yes, start from the beginning 2. No, keep going as I am\"", text)
+            self.assertIn("python3 workforce/runtime/start_fresh.py answer yes --via update", text)
+            self.assertIn("python3 workforce/runtime/start_fresh.py answer not-now --via update", text)
+            self.assertIn("any answer that is not a clear yes", text)
+            self.assertIn("don't run Start fresh here", text)
+            self.assertIn("Never bring it up again in this update.", text)
+            self.assertNotIn("`ready` or `unsaved_work`", text)
+            self.assertNotIn("You did a first run of the course.", text)
 
     def test_no_em_dashes_in_new_words(self):
         for path in ENROLL + UPDATE:
