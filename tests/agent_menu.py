@@ -134,6 +134,12 @@ class AgentMenu(unittest.TestCase):
         self.assertNotIn("aibl-other-workbench.md", line)
         self.assertIn("do not hand them the command", line)
         self.assertFalse((self.menu / "aibl-the-professor.md").exists())
+        # Codex runs the same hook with no CLAUDE_PROJECT_DIR and has no @ menu: no menu line there
+        codex_env = {k: v for k, v in self.env.items() if k != "CLAUDE_PROJECT_DIR"}
+        payload = json.dumps({"source": "startup", "session_id": str(uuid.uuid4()), "cwd": str(self.wb)})
+        p = subprocess.run(["node", str(HOOK)], input=payload, text=True, capture_output=True, env=codex_env, cwd=str(self.wb))
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertNotIn("agent menu", p.stdout)
 
         applied = json.loads(self.run_hook("--agent-menu-apply"))
         self.assertEqual(applied["status"], "in_step")

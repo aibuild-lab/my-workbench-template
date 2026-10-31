@@ -12,6 +12,16 @@
 //     Code agent menu" below); the hook adds one line when they are not.
 //   node .claude/hooks/update-check.mjs --home-workbench [--home-workbench-apply]
 //     whether ~/.aibl/workbench.json records this workbench as the home workbench.
+//   node .claude/hooks/update-check.mjs --joining-from
+//     signs that the student is joining from Agent Team HQ (in this workbench) or from Agent
+//     Native Camp (beside it), which aibl-enroll step 1 reads to say the right thing. See "Where
+//     the student is joining from" below. It only looks, with one exception: on a verified Camp
+//     sign whose line was never said (camp.next "say"), it writes ~/.aibl/camp.json itself, so
+//     the line is said once and there is no separate command for an agent to turn into a question.
+//   node .claude/hooks/update-check.mjs --camp-record yes|no
+//     writes ~/.aibl/camp.json, the one record of the Camp line or question, so neither the
+//     installer nor aibl-enroll asks or says it again. aibl-enroll runs it only right after the
+//     student answered the Camp question (a weak sign); a strong sign is recorded by --joining-from.
 //
 //   Team settings: a program never ships .claude/settings.json. A program that has settings of its
 //   own ships a merge script (PROGRAM_SETTINGS below); the check runs that script's read-only preview
@@ -21,8 +31,9 @@
 //
 // Rules, borrowed from the Camp update check that ran for months:
 //   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
-//      Its only writes are --agent-menu-apply and --home-workbench-apply, outside the
-//      workbench, which aibl-update and aibl-enroll run only after the student's yes.
+//      Its only writes are --agent-menu-apply, --home-workbench-apply and --camp-record, outside
+//      the workbench, which aibl-update and aibl-enroll run only after the student's yes or answer,
+//      and --joining-from's Camp record on a verified Camp sign (the line it is about to hear).
 //      The hook itself never writes.
 //   2. It never blocks a session: every path exits 0, and a broken check stays quiet.
 //   3. New conversations only. resume, compact and fork continue one that already heard
@@ -204,6 +215,23 @@ const LEGACY_EDITION = {
 // opened outside this workbench still has them (workforce-internal #98).
 const COURSE_SKILLS = ["aibl-bridge", "aibl-bridge-setup"];
 const HOME_POINTER_SCHEMA = "aibl.home-workbench/v1";
+// "Where the student is joining from" (declared up here because main() runs below)
+const CAMP_ID = "repo.agent-native-camp";
+// A remote that names Camp's own repository, or a camper's private mirror of it (Camp's
+// scripts/course-repo-lib.mjs: COURSE_REPO and PRIVATE_REPO_NAME), in any normal GitHub spelling.
+const CAMP_REMOTE = /(?:^|[@/])github\.com[:/](?:aibuild-lab\/agent-native-camp|[A-Za-z0-9-]+\/agent-native-camp-private)(?:\.git)?\/?$/i;
+// The tracked marker Camp's scripts/scaffold-context-repo.sh writes into ~/context-repo.
+const CAMP_CONTEXT_MARKER = /^camp-context-repo-schema=\d+$/;
+// Where a Camp clone is looked for, under the home folder, ~/GitHub first, by either name.
+const CAMP_PARENTS = [
+  ["GitHub"], [], ["Documents", "GitHub"], ["Documents"], ["Desktop"],
+  ["OneDrive", "Documents", "GitHub"], ["OneDrive", "Documents"], ["OneDrive", "Desktop"],
+];
+const CAMP_NAMES = ["agent-native-camp", "agent-native-camp-private"];
+// ~/.aibl/camp.json: the one record, shared with the installer's hub_setup.py, that the Camp line
+// was said or the Camp question answered. It is what keeps the question to once, ever.
+const CAMP_RECORD_SCHEMA = "aibl.camp-answer/v1";
+const NIGHT_SHIFT = "aibl-hq-night-shift";
 const PLACED_SCHEMA = "aibl.agent-menu-placed/v2";
 const WINDOWS = process.platform === "win32";
 // Mac and Windows folders ignore letter case, so paths are compared the same way there.
@@ -223,6 +251,10 @@ function main() {
       const root = resolveRoot({});
       const report = root ? homeWorkbench(root) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--camp-record")) {
+      process.stdout.write(JSON.stringify(recordCamp(argValue("--camp-record")), null, 2) + "\n");
+    } else if (process.argv.includes("--joining-from")) {
+      process.stdout.write(JSON.stringify(joiningFrom(), null, 2) + "\n");
     } else if (process.argv.includes("--agent-menu-apply")) {
       const root = resolveRoot({});
       const report = root ? applyAgentMenu(root, replaceEditedArgs(), argValue("--expect")) : { status: "not_a_workbench" };
@@ -274,7 +306,10 @@ function hook() {
   if (!root) return;
   if (!claimThisConversation(payload.session_id, root)) return;
   const report = check(root);
-  const sentences = [describe(report), describeAgentMenu(agentMenu(root))].filter(Boolean);
+  // The @ agent menu is Claude's. Codex runs this same script from .codex/hooks.json and has no such menu,
+  // so the menu line is only for Claude, which sets CLAUDE_PROJECT_DIR for its hooks (Codex does not).
+  const menuLine = process.env.CLAUDE_PROJECT_DIR ? describeAgentMenu(agentMenu(root)) : null;
+  const sentences = [describe(report), menuLine].filter(Boolean);
   if (sentences.length) emit(sentences.join(" "));
 }
 
@@ -1542,6 +1577,230 @@ function applyHomeWorkbench(root) {
     return { ...homeWorkbench(root), applied: false, error: error.code || "write_failed", previous: before.recorded };
   }
   return { ...homeWorkbench(root), applied: true, previous: before.recorded };
+}
+
+// ---------------------------------------------------------------------------
+// Where the student is joining from
+// ---------------------------------------------------------------------------
+//
+// aibl-enroll step 1 reads this so it can say the right thing to two groups (Wonderboy,
+// Workforce/v2/Joining-Workforce-Guides-10-30-2026.md, "What should move into the installer and
+// template"):
+//   Agent Team HQ graduates: the program's stamp or folders in this workbench, and a night shift
+//     (the hq-schedule skill's default job, aibl-hq-night-shift, kept in .aibl-local/schedule/,
+//     and on a Mac also a launchd file of the same name). The night shift rewrites tracked Team HQ
+//     files every morning, so enrolling should follow a fresh save.
+//   Agent Native Camp alumni. Campers were set up by the Agent Native OS workshop installer,
+//     which makes ~/GitHub (Windows: %USERPROFILE%\GitHub) and puts agent-native-os in it; Camp
+//     then adds its own reference clone beside it, ~/GitHub/agent-native-camp (Camp's update
+//     check looks for agent-native-os next to the Camp clone, and its diagnosis script names
+//     that folder). Verified Camp signs, any one of which is enough:
+//       - a Camp clone holding Camp's descriptor (id repo.agent-native-camp, on Camp main since
+//         09-02-2026, so a clone last updated before then has none);
+//       - a Camp clone whose own .git/config names aibuild-lab/agent-native-camp or a camper's
+//         private <name>/agent-native-camp-private mirror (every Camp clone has one of these);
+//       - ~/context-repo holding Camp's marker file .camp-context-repo (Week 2's scaffold, run
+//         on the camper's own computer).
+//     A Camp clone is looked for at ~/GitHub first, then at a few fixed places a camper may have
+//     put it instead (~, Documents, Documents/GitHub, Desktop, and the OneDrive copies Windows
+//     uses for Documents and Desktop), under its own name or its private mirror's name.
+//     Reasons to ask, never to assume: a Camp-named folder with neither descriptor nor Camp
+//     remote, ~/context-repo without Camp's marker, or Week 1's ~/Documents/Agent-Native-Camp.
+//     ~/.hermes is not a sign: the Agent Native OS workshop also teaches a local Hermes there,
+//     and on Camp's own path Hermes runs under a separate campagent account, not in this home.
+//     Many campers keep Hermes and their agent's copy of context-repo on a server, so finding
+//     nothing proves nothing.
+// The report only looks, apart from one write: when it returns camp.next "say" (a verified sign, the
+// line never said), it writes ~/.aibl/camp.json itself (told: true, by aibl-enroll) and reports
+// camp.recorded, so a rerun says "none" and the agent has nothing to run or ask afterwards (an
+// enroll prompt that says "change nothing until I say yes" once turned that separate command into
+// a question, 10-30). The weak-sign answer is still written by --camp-record, after the answer.
+// It never lists a folder; it checks fixed paths, and the only files it opens are
+// three small ones Camp itself writes (the descriptor, a candidate clone's .git/config, and the
+// context-repo marker). It runs no Git command in a Camp folder, and it never moves, copies or
+// deletes anything. Paths in the report are for the agent, not the student.
+
+function campDescriptor(folder) {
+  // "camp" when the folder's .aibl/repository.json names Camp, "other" when it names something
+  // else or cannot be read, null when there is none. Read only, and only a small file.
+  const file = path.join(folder, ".aibl", "repository.json");
+  try {
+    const info = fs.statSync(file);
+    if (!info.isFile() || info.size > 64 * 1024) return "other";
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return parsed && parsed.id === CAMP_ID ? "camp" : "other";
+  } catch (error) {
+    return error && error.code === "ENOENT" ? null : "other";
+  }
+}
+
+function campRemote(folder) {
+  // True when the folder's own .git/config has a remote naming Camp or a private Camp mirror.
+  // Reads that one small file as text; runs no Git command in the folder.
+  const file = path.join(folder, ".git", "config");
+  try {
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.size > 64 * 1024) return false;
+    let inRemote = false;
+    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+      const section = /^\s*\[\s*([A-Za-z]+)/.exec(line);
+      if (section) { inRemote = section[1].toLowerCase() === "remote"; continue; }
+      const url = /^\s*url\s*=\s*"?([^"\s]+)"?\s*$/i.exec(line);
+      if (inRemote && url && CAMP_REMOTE.test(url[1])) return true;
+    }
+  } catch { /* no clone here, or unreadable: not a sign */ }
+  return false;
+}
+
+function campContextMarker(folder) {
+  // True when the folder holds Camp's .camp-context-repo marker with Camp's own text.
+  const file = path.join(folder, ".camp-context-repo");
+  try {
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.size > 1024) return false;
+    return CAMP_CONTEXT_MARKER.test(fs.readFileSync(file, "utf8").trim());
+  } catch { return false; }
+}
+
+function isCampFolder(folder) {
+  return campDescriptor(folder) === "camp" || campRemote(folder) || campContextMarker(folder);
+}
+
+function isFolder(target) {
+  try { return fs.statSync(target).isDirectory(); } catch { return false; }
+}
+
+function teamHqSigns(root) {
+  const signs = [];
+  if (isRealFile(path.join(root, ".aibl", "programs", "agent-team-hq.json"))) signs.push(".aibl/programs/agent-team-hq.json");
+  if (isRealFile(path.join(root, "team-hq", "CONTENTS.md"))) signs.push("team-hq/CONTENTS.md");
+  if (isFolder(path.join(root, "work", "team-hq"))) signs.push("work/team-hq/");
+  if (git(root, ["remote", "get-url", "agent-team-hq"])) signs.push("remote agent-team-hq");
+  const nightShift = [];
+  if (isFolder(path.join(root, ".aibl-local", "schedule", NIGHT_SHIFT))) nightShift.push(`.aibl-local/schedule/${NIGHT_SHIFT}/`);
+  if (process.platform === "darwin" &&
+      isRealFile(path.join(os.homedir(), "Library", "LaunchAgents", `${NIGHT_SHIFT}.plist`))) {
+    nightShift.push(`~/Library/LaunchAgents/${NIGHT_SHIFT}.plist`);
+  }
+  return {
+    found: signs.length > 0,
+    signs,
+    night_shift: nightShift.length > 0,
+    night_shift_signs: nightShift,
+    work_folder: isFolder(path.join(root, "work", "team-hq")),
+  };
+}
+
+function campSigns() {
+  const home = os.homedir();
+  const signs = [];
+  const weak = [];
+  let folder = null;
+  for (const parent of CAMP_PARENTS) {
+    for (const name of CAMP_NAMES) {
+      const candidate = path.join(home, ...parent, name);
+      if (!isFolder(candidate)) continue;
+      const shown = ["~", ...parent, name].join("/");
+      const descriptor = campDescriptor(candidate) === "camp";
+      if (descriptor || campRemote(candidate)) {
+        signs.push(`${shown} with ${descriptor ? "repo.agent-native-camp" : "a Camp remote"}`);
+        if (!folder) folder = candidate;
+      } else {
+        weak.push(`${shown} without Camp's descriptor or remote`);
+      }
+    }
+  }
+  const context = path.join(home, "context-repo");
+  if (isFolder(context)) {
+    if (campContextMarker(context)) signs.push("~/context-repo with Camp's marker");
+    else weak.push("~/context-repo");
+  }
+  for (const parent of [["Documents"], ["OneDrive", "Documents"]]) {
+    if (isFolder(path.join(home, ...parent, "Agent-Native-Camp"))) {
+      weak.push(["~", ...parent, "Agent-Native-Camp"].join("/"));
+    }
+  }
+  const found = signs.length ? "yes" : weak.length ? "ask" : "not_seen";
+  const record = readCampRecord();
+  return { found, folder, signs, weak_signs: weak, record, next: campNext(found, record) };
+}
+
+// What aibl-enroll does about Camp: "say" the one line, "ask" the one question, or "none".
+// A strong sign never asks. Once the record exists, nothing is asked again; the line is said only
+// when a strong sign shows up and the record says it was never said. A record that cannot be read
+// counts as answered, so a broken file never brings the question back.
+function campNext(found, record) {
+  if (record && record.unreadable) return "none";
+  if (found === "yes") return record && record.told ? "none" : "say";
+  if (found === "ask") return record ? "none" : "ask";
+  return "none";
+}
+
+function campRecordFile() {
+  return path.join(os.homedir(), ".aibl", "camp.json");
+}
+
+function readCampRecord() {
+  // null when there is none; { took_camp, told, by } when it is Camp's record; { unreadable: true }
+  // for anything else at that path.
+  const file = campRecordFile();
+  try {
+    const info = fs.lstatSync(file);
+    if (!info.isFile() || info.size > 4096) return { unreadable: true };
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!parsed || parsed.schema !== CAMP_RECORD_SCHEMA || typeof parsed.took_camp !== "boolean") return { unreadable: true };
+    return { took_camp: parsed.took_camp, told: parsed.told === true, by: typeof parsed.by === "string" ? parsed.by : null };
+  } catch (error) {
+    return error && error.code === "ENOENT" ? null : { unreadable: true };
+  }
+}
+
+function recordCamp(answer) {
+  // yes: the student took Camp and has heard the Camp line. no: they said they did not.
+  if (answer !== "yes" && answer !== "no") return { applied: false, error: "answer_must_be_yes_or_no" };
+  const file = campRecordFile();
+  const linked = linkedFolders(os.homedir(), [".aibl"]);
+  if (linked.length || isLink(file)) return { applied: false, error: "linked_folder" };
+  const record = {
+    schema: CAMP_RECORD_SCHEMA,
+    took_camp: answer === "yes",
+    told: answer === "yes",
+    by: "aibl-enroll",
+    recorded_at: new Date().toISOString(),
+  };
+  const temp = `${file}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(temp, JSON.stringify(record, null, 2) + "\n");
+    fs.renameSync(temp, file);
+  } catch (error) {
+    try { fs.rmSync(temp, { force: true }); } catch { /* our own temp file */ }
+    return { applied: false, error: error.code || "write_failed" };
+  }
+  return { applied: true, record: readCampRecord() };
+}
+
+function joiningFrom() {
+  // A Camp folder (the Camp clone or ~/context-repo) opened by mistake is the one case that is
+  // not a workbench and still matters.
+  const top = git(process.cwd(), ["rev-parse", "--show-toplevel"]);
+  if (top && isCampFolder(top)) {
+    return { status: "camp_folder", folder: path.resolve(top), groups: ["camp"] };
+  }
+  const root = resolveRoot({});
+  if (!root) return { status: "not_a_workbench" };
+  const teamHq = teamHqSigns(root);
+  const camp = campSigns();
+  if (camp.next === "say") {
+    // The line is about to be said: note it now, so it is never said again and nothing is left to ask.
+    const written = recordCamp("yes");
+    camp.recorded = written.applied === true;
+    if (!written.applied) camp.record_error = written.error;
+  }
+  const groups = [];
+  if (teamHq.found) groups.push("team_hq");
+  if (camp.found === "yes") groups.push("camp");
+  return { status: "ok", workbench: path.resolve(root), groups, team_hq: teamHq, camp };
 }
 
 // ---------------------------------------------------------------------------
