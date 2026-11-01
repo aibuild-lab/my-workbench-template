@@ -111,8 +111,8 @@ class SkillText(unittest.TestCase):
                        "**If it isn't allowed, wait.**",
                        "the session's approval policy is never",
                        "never say or suggest the step happened",
-                       "still say the plain line first, then the waiting line, in the same reply",
-                       "the waiting line ends your reply: never quote this skill, link a file, or explain why no box came",
+                       "that reply is exactly two lines: the step's plain line, then its waiting line, word for word",
+                       "Nothing before them and nothing after: no note that a permission is needed or can't be asked, no quote of this skill, no file link",
                        "On \"try again\""]:
             self.assertIn(phrase, s)
 
