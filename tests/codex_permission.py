@@ -112,7 +112,7 @@ class SkillText(unittest.TestCase):
                        "the session's approval policy is never",
                        "never say or suggest the step happened",
                        "still say the plain line first, then the waiting line, in the same reply",
-                       "never quote this skill, link a file, or explain the app's settings or policies",
+                       "the waiting line ends your reply: never quote this skill, link a file, or explain why no box came",
                        "On \"try again\""]:
             self.assertIn(phrase, s)
 
