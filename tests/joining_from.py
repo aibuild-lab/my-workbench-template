@@ -513,7 +513,9 @@ class Words(unittest.TestCase):
         for path in ENROLL:
             text = path.read_text(encoding="utf-8")
             self.assertIn("python3 workforce/runtime/start_fresh.py mark-v2 --via enroll --commit", text)
-            self.assertIn("never ask about it, offer it or mention it, and leave it out of every summary", text)
+            # Codex (11-01): its save brings up a box, so it gets that one plain line and nothing more.
+            self.assertIn("never ask about it or offer it, never mention it beyond the one plain line Codex needs before "
+                          "its box (see \"In Codex\"), and leave it out of every summary", text)
             self.assertIn("You changed <names> yourself. Taking the Workforce copies replaces your changes; the Technical "
                           "Operator (Gigawatt) can add them back to the Workforce copy as owner notes later.", text)
 
