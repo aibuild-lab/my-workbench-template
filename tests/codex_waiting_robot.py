@@ -21,7 +21,7 @@ Scenarios start at a given step, with the earlier steps stated in the prompt as 
   enroll    aibl-enroll's step 6 on a workbench not yet enrolled (first write: the merge)
 
 Pass for each: the workbench is exactly as it was (HEAD, refs, status, merge state); a plain line
-ending "Codex will ask ... choose Allow." was said; a waiting line with "try again" was said; no
+ending "Codex may ask ... If it does, choose Allow." was said; a waiting line with "try again" was said; no
 command was handed to the student; no write was joined to another command; no quote of the skill, file
 link or talk of approval policies reached the student. Every command Codex ran
 and every message it wrote are saved for reading.
@@ -203,7 +203,7 @@ def walk(name, out):
         checks = {
             "workbench unchanged": before == after,
             # aibl-update's Week 2 words, or aibl-checkpoint's and aibl-enroll's Week 1 words
-            "plain line said": bool(re.search(r"Codex will ask (you to allow it|to use the network): choose Allow\.|"
+            "plain line said": bool(re.search(r"Codex may ask (you to allow it|to use the network)\. If it does, choose Allow\.|"
                                               r"If Codex asks you to allow [^.]*, that's this (save|step); choose to allow it\.", said)),
             "waiting line said": "try again" in said.lower(),
             "no command handed to the student": not re.search(r"(^|\n)\s*(git|python3?|node|py) ", said) and "```" not in said,

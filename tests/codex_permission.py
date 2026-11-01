@@ -100,8 +100,8 @@ class SkillText(unittest.TestCase):
 
     def test_the_section_states_the_five_rules(self):
         s = section(self.text)
-        for phrase in ["**One plain line first.**", "Codex will ask you to allow it: choose Allow.",
-                       "Codex will ask to use the network: choose Allow.",
+        for phrase in ["**One plain line first.**", "Codex may ask you to allow it. If it does, choose Allow.",
+                       "Codex may ask to use the network. If it does, choose Allow.",
                        "never joined to another with `&&`, `;` or `|`",
                        "Request the app's permission together with that exact command",
                        "Never try it first and ask only after it fails",
@@ -156,7 +156,7 @@ class SkillText(unittest.TestCase):
         self.assertGreaterEqual(len(rows), 16)
         for step, write, plain, waiting in rows:
             self.assertTrue(plain.startswith('"Next '), plain)
-            self.assertRegex(plain, r"Codex will ask (you to allow it|to use the network): choose Allow\.\"")
+            self.assertRegex(plain, r"Codex may ask (you to allow it|to use the network)\. If it does, choose Allow\.\"")
             for line in (plain, waiting):
                 self.assertNotIn("`", line)
                 self.assertNotRegex(line, r"\b[A-Z]{2,}\b", "no word in capitals in a student line")
@@ -169,7 +169,7 @@ class SkillText(unittest.TestCase):
         rows = {r[1]: r for r in table_rows(self.text)}
         commit = rows["the merge's `git commit`"]
         self.assertEqual(commit[2].replace("<what's new>", "Week 2"),
-                         '"Next I bring Week 2 into your workbench\'s history. Codex will ask you to allow it: choose Allow."')
+                         '"Next I bring Week 2 into your workbench\'s history. Codex may ask you to allow it. If it does, choose Allow."')
 
     def test_no_command_is_joined_to_another(self):
         blocks = re.findall(r"```\n(.*?)```", self.text, flags=re.S)

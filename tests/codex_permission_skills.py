@@ -4,7 +4,7 @@ Same rule as tests/codex_permission.py (read its docstring for why), applied to 
 template skills that write the workbench's history. These two use the course's Week 1 words for the
 box ("If Codex asks you to allow a save to your workbench's history, that's this save; choose to
 allow it."), because students meet them in setup and Week 1, where the lessons say it that way;
-aibl-update keeps Week 2's fixed line ("Codex will ask you to allow it: choose Allow."), which
+aibl-update keeps Week 2's fixed line ("Codex may ask you to allow it. If it does, choose Allow."), which
 Lesson 1's page quotes.
 
 Text checks: both copies identical; the five rules; every Git verb named is classified, every write
