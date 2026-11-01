@@ -181,8 +181,8 @@ class SkillText(unittest.TestCase):
             self.assertNotRegex(command, r"\s\|\s", f"piped command: {command}")
 
     def test_no_em_or_en_dashes(self):
-        self.assertNotIn("—", self.text)
-        self.assertNotIn("–", self.text)
+        self.assertNotIn("\u2014", self.text)
+        self.assertNotIn("\u2013", self.text)
 
 
 class WaitingLinesAreTrue(unittest.TestCase):
