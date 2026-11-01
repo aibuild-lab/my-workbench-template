@@ -17,6 +17,8 @@ Scenarios start at a given step, with the earlier steps stated in the prompt as 
   agents    step 2's checkout of the chosen core paths, which writes .git and .agents
   merge     step 6's merge, after the student's yes
   commit    step 6's commit, the merge already in place (MERGE_HEAD present)
+  checkpoint  aibl-checkpoint's save of one changed note (first write: the commit)
+  enroll    aibl-enroll's step 6 on a workbench not yet enrolled (first write: the merge)
 
 Pass for each: the workbench is exactly as it was (HEAD, refs, status, merge state); a plain line
 ending "Codex will ask ... choose Allow." was said; a waiting line with "try again" was said; no
@@ -57,6 +59,19 @@ SCENARIOS = {
     "commit": LEAD + "Steps 1 to 5 are done, and in step 6 the merge of agent-workforce/student at {course_sha} is "
               "already in place, not yet saved; you showed me the staged changes and I approved them. Go on with "
               "step 6: save it. Don't merge again and don't cancel. Stop at the first point where you need me.",
+    # aibl-checkpoint: a changed note, saved (its first write is the commit).
+    "checkpoint": "I'm a student in Codex. Use the workbench skill aibl-checkpoint (read .agents/skills/aibl-checkpoint/SKILL.md "
+                  "completely and follow it exactly, including its section \"In Codex: one permission for each protected write\"). "
+                  "Save my work: the change to my project note in context/project.md, with the label \"Project note, second "
+                  "pass\". You've already shown me what changed and I approve that label and that one file. Stop at the first "
+                  "point where you need me.",
+    # aibl-enroll: a workbench not yet enrolled, the program fetched and pinned (its first write is the merge).
+    "enroll": "I'm a student in Codex. Use the workbench skill aibl-enroll (read .agents/skills/aibl-enroll/SKILL.md "
+              "completely and follow it exactly, including its section \"In Codex: one permission for each protected write\"). "
+              "Steps 1 to 5 are already done in this conversation for Agent Workforce: this is my workbench with my private "
+              "backup, nothing is unsaved, I have access, the agent-workforce remote is connected and its student branch is "
+              "fetched and pinned at {course_sha}, the incoming tree checked out, there are no collisions, and I approved the "
+              "whole preview. Don't fetch again. Go on with step 6. Stop at the first point where you need me.",
 }
 
 
@@ -118,6 +133,8 @@ def build(base, scenario):
     redirect = ["-c", f"url.{course.as_posix()}.insteadOf={OFFICIAL['agent-workforce']}",
                 "-c", f"url.{template.as_posix()}.insteadOf={OFFICIAL['template']}"]
     git(wb, *redirect, "fetch", "-q", "agent-workforce", "student")
+    if scenario == "enroll":  # not enrolled yet: the program is fetched and pinned, nothing merged
+        return wb, {"course_sha": git(wb, "rev-parse", "agent-workforce/student").stdout.strip()}
     git(wb, "merge", "-q", "--allow-unrelated-histories", "--no-ff", "-m", "Add Agent Workforce", "agent-workforce/student")
     write(course, {".aibl/programs/agent-workforce.json": json.dumps({"program": "agent-workforce", "edition": "week-2"}) + "\n",
                    "course/workforce/lessons/anw-w2-keep.md": "# Week 2 Lesson 1 (stand-in)\n",
@@ -132,6 +149,9 @@ def build(base, scenario):
             "template_sha": git(wb, "rev-parse", "template/main").stdout.strip()}
     if scenario == "commit":
         git(wb, "merge", "--no-ff", "--no-commit", "agent-workforce/student")
+    if scenario == "checkpoint":  # one changed, tracked note, not saved yet
+        note = wb / "context/project.md"
+        note.write_bytes(note.read_bytes() + b"\nSecond pass: the salon opens at 8 on Saturdays.\n")
     return wb, shas
 
 
@@ -182,7 +202,9 @@ def walk(name, out):
         joined = [c["command"] for c in writes if re.search(r"&&|;\s*git|\|\s*git|git[^\n]*;\s*\S", c["command"].split("-Command", 1)[-1])]
         checks = {
             "workbench unchanged": before == after,
-            "plain line said": bool(re.search(r"Codex will ask (you to allow it|to use the network): choose Allow\.", said)),
+            # aibl-update's Week 2 words, or aibl-checkpoint's and aibl-enroll's Week 1 words
+            "plain line said": bool(re.search(r"Codex will ask (you to allow it|to use the network): choose Allow\.|"
+                                              r"If Codex asks you to allow [^.]*, that's this (save|step); choose to allow it\.", said)),
             "waiting line said": "try again" in said.lower(),
             "no command handed to the student": not re.search(r"(^|\n)\s*(git|python3?|node|py) ", said) and "```" not in said,
             "no joined write": not joined,
