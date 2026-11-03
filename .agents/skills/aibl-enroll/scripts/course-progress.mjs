@@ -44,6 +44,8 @@ function valid(value, now) {
         !Number.isInteger(row.week) || row.week < 0 || row.week > 4 ||
         typeof row.done !== 'boolean' || typeof row.recorded !== 'boolean' || (row.done && !row.recorded)) throw new Error('Invalid lesson record.');
     ids.add(row.id);
+    if (row.checklist != null && (!Number.isInteger(row.checklist.total) || row.checklist.total < 0 || row.checklist.total > 1000 ||
+        !Number.isInteger(row.checklist.completed) || row.checklist.completed < 0 || row.checklist.completed > row.checklist.total)) throw new Error('Invalid lesson checklist.');
   }
 }
 export function project(value, now = Date.now()) {
@@ -52,7 +54,8 @@ export function project(value, now = Date.now()) {
   const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);
   const calendar = WEEKS.filter(date => date <= day).length;
   const p = value.learn_progress;
-  const lessons = p?.lessons.map(({ id, week, done, recorded }) => ({ id, week, done, recorded }));
+  const lessons = p?.lessons.map(({ id, week, done, recorded, checklist }) => ({ id, week, done, recorded,
+    checklist: checklist == null ? null : { completed: checklist.completed, total: checklist.total } }));
   const real = lessons?.some(row => row.recorded);
   const pending = lessons?.find(row => !row.done);
   return {

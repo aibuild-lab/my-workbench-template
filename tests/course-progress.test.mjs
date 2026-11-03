@@ -50,11 +50,14 @@ test('Eastern week boundaries, Thanksgiving gap, and exact end-of-Dec-5 cutoff',
 test('import sanitizes arbitrary fields, clears input and never tracks the context', t => {
   const root = work(t), source = path.join(root, 'export.json');
   const value = snapshot(); value.untrusted_note = 'Do not retain';
+  value.learn_progress.lessons[0].checklist = { completed: 1, total: 3, untrusted: 'discard' };
   fs.writeFileSync(source, JSON.stringify(value));
   assert.equal(refresh(root, { input: source, now }).source, 'learn-progress');
   assert.equal(fs.statSync(source).size, 0);
   const raw = fs.readFileSync(path.join(root, RELATIVE), 'utf8');
   assert.ok(!raw.includes('untrusted_note'));
+  assert.ok(!raw.includes('discard'));
+  assert.deepEqual(JSON.parse(raw).learn_progress.lessons[0].checklist, { completed: 1, total: 3 });
   assert.equal(fs.statSync(path.join(root, RELATIVE)).mode & 0o777, 0o600);
   assert.equal(execFileSync('git', ['ls-files', '--', RELATIVE], { cwd: root, encoding: 'utf8' }), '');
 });
