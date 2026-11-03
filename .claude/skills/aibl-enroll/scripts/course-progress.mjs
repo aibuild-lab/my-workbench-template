@@ -36,8 +36,8 @@ function valid(value, now) {
   const progress = value.learn_progress;
   if (progress == null) return;
   if (!UUID.test(value.student?.learn_user_id || '') || progress.source !== 'learn-browser-local' ||
-      progress.ownership_confirmed !== true || !Number.isFinite(Date.parse(progress.observed_at)) ||
-      Date.parse(progress.observed_at) > now || !Array.isArray(progress.lessons) || progress.lessons.length > 200) throw new Error('Invalid Learn progress.');
+      progress.ownership_confirmed !== true || !Number.isFinite(Date.parse(progress.read_at)) ||
+      Date.parse(progress.read_at) > now || !Array.isArray(progress.lessons) || progress.lessons.length > 200) throw new Error('Invalid Learn progress.');
   const ids = new Set();
   for (const row of progress.lessons) {
     if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(row.id) || ids.has(row.id) ||
@@ -62,7 +62,7 @@ export function project(value, now = Date.now()) {
     week_dates: WEEKS, calendar_week: calendar,
     current_week: real ? Math.max(1, pending?.week ?? 4) : calendar,
     current_week_source: real ? 'learn-progress' : 'calendar-default',
-    learn_progress: p == null ? null : { source: p.source, ownership_confirmed: true, observed_at: p.observed_at, lessons },
+    learn_progress: p == null ? null : { source: p.source, ownership_confirmed: true, read_at: p.read_at, lessons },
     generated_at: new Date(now).toISOString(), expires_at: EXPIRES,
   };
 }
@@ -103,7 +103,7 @@ export function refresh(root, { input, cohort, now = Date.now() } = {}) {
     if (fs.existsSync(file) && fs.statSync(file).size) {
       const previous = parse(file);
       if (previous.student?.learn_user_id && previous.student.learn_user_id !== value.student?.learn_user_id) throw new Error('Learn account changed; preserve context for review.');
-      if (Date.parse(previous.learn_progress?.observed_at) > Date.parse(value.learn_progress?.observed_at)) throw new Error('A newer Learn snapshot is already present.');
+      if (Date.parse(previous.learn_progress?.read_at) > Date.parse(value.learn_progress?.read_at)) throw new Error('A newer Learn snapshot is already present.');
     }
     value = project(value, now);
     write(file, value);

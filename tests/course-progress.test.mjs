@@ -10,7 +10,7 @@ const subject = '11111111-1111-4111-8111-111111111111';
 function snapshot() {
   return { schema_version: 'aibl.course-progress/v1', program: 'agent-workforce', cohort: { id: COHORT },
     week_dates: WEEKS, student: { learn_user_id: subject }, generated_at: new Date(now).toISOString(), expires_at: EXPIRES,
-    learn_progress: { source: 'learn-browser-local', observed_at: new Date(now).toISOString(), ownership_confirmed: true,
+    learn_progress: { source: 'learn-browser-local', read_at: new Date(now).toISOString(), ownership_confirmed: true,
       lessons: [{ id: 'anw-l01', week: 1, done: false, recorded: true }, { id: 'anw-l13', week: 2, done: false, recorded: false }] } };
 }
 function work(t) {
@@ -28,8 +28,8 @@ test('real progress wins both behind and ahead; refresh retains observation time
   value.learn_progress.lessons[1].week = 4;
   assert.equal(project(value, now).current_week, 4);
   const refreshed = project(value, now + 86400000);
-  assert.equal(refreshed.learn_progress.observed_at, new Date(now).toISOString());
-  assert.notEqual(refreshed.generated_at, refreshed.learn_progress.observed_at);
+  assert.equal(refreshed.learn_progress.read_at, new Date(now).toISOString());
+  assert.notEqual(refreshed.generated_at, refreshed.learn_progress.read_at);
   value.learn_progress.lessons.forEach(r => { r.recorded = false; r.done = false; });
   assert.equal(project(value, now).current_week_source, 'calendar-default');
 });
