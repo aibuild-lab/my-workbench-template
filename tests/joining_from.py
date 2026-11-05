@@ -513,7 +513,9 @@ class Words(unittest.TestCase):
         for path in ENROLL:
             text = path.read_text(encoding="utf-8")
             self.assertIn("python3 workforce/runtime/start_fresh.py mark-v2 --via enroll --commit", text)
-            self.assertIn("never ask about it, offer it or mention it, and leave it out of every summary", text)
+            # Codex (11-01): its save brings up a box, so it gets that one plain line and nothing more.
+            self.assertIn("never ask about it or offer it, never mention it beyond the one plain line Codex needs before "
+                          "its box (see \"In Codex\"), and leave it out of every summary", text)
             self.assertIn("You changed <names> yourself. Taking the Workforce copies replaces your changes; the Technical "
                           "Operator (Gigawatt) can add them back to the Workforce copy as owner notes later.", text)
 
@@ -524,13 +526,14 @@ class Words(unittest.TestCase):
             text = path.read_text(encoding="utf-8")
             self.assertIn("python3 workforce/runtime/start_fresh.py check", text)
             self.assertIn("Ask only when its `state` is `returning_v1`", text)
+            # Wade, 11-01 (N4): Start fresh is recommended, and the question says what carries over.
             self.assertIn(
-                "\"One question, and I'll only ask it once. This update brings the new version of Agent Workforce, "
-                "and the course has changed a lot since your first run: new lessons, in a new order, with new pages "
-                "on Learn. Would you like to take it from the beginning? Your first run is saved in a dated folder "
-                "first, and nothing is deleted. Or keep going as you are; that's fine too, and the lessons you open "
-                "from here on will be the new version either way. "
-                "1. Yes, start from the beginning 2. No, keep going as I am\"", text)
+                "\"One question, and I'll only ask it once. Would you like to start the new version from the beginning? "
+                "We recommend it. Your first run is saved in a dated folder first, nothing is deleted, and your agents, "
+                "your Chief of Staff's name, your connections and your library keep working, so this time you're doing "
+                "the lessons, not the setup. Or keep going as you are; that's fine too, and the lessons you open from "
+                "here on will be the new version either way. "
+                "1. Yes, start from the beginning (recommended) 2. No, keep going as I am\"", text)
             self.assertIn("python3 workforce/runtime/start_fresh.py answer yes --via update", text)
             self.assertIn("python3 workforce/runtime/start_fresh.py answer not-now --via update", text)
             self.assertIn("any answer that is not a clear yes", text)
