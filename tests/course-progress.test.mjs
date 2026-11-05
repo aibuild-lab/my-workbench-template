@@ -113,3 +113,10 @@ test('a download that cannot be cleared still imports and says so', t => {
   assert.deepEqual(refresh(root, { input: source, now }), { status: 'refreshed', current_week: 1, source: 'learn-progress', input_left: true });
   assert.ok(fs.statSync(path.join(root, RELATIVE)).size > 0);
 });
+test('a download dropped anywhere in the workbench stays out of Git', t => {
+  const root = work(t);
+  fs.copyFileSync(new URL('../.gitignore', import.meta.url), path.join(root, '.gitignore'));
+  for (const name of ['course-progress-import.json', 'course-progress-import (1).json', 'work/course-progress-import.json']) {
+    execFileSync('git', ['check-ignore', '--no-index', '-q', '--', name], { cwd: root });
+  }
+});
