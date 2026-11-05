@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-04
+
+- `aibl-update` no longer stops for lesson output (WF-6, decision 40). Step 1 stops only for something already staged, an unfinished merge, or unsaved changes in the core skills, the update check or `.gitignore`, and then asks "Save them now and continue the update? (yes / no)" and carries on in the same conversation. New step 2.6 offers to save everything else after the core refresh and the privacy lines, so the save uses the current `aibl-checkpoint` and job folders stay out of it. Step 5 asks again only for a file the program itself changes. `aibl-enroll` keeps its stop: it merges a whole program. Both copies identical; `tests/update_unsaved_work.py` runs the Git side on throwaway repositories.
+
 ## 2026-11-02
 
 - `aibl-update` step 6: a conflict in `workforce/ROSTER.md` takes the program's copy without asking, the same as `registry.yaml` (Wade's ruling, 10-30). The first version's `name_seat.py` wrote the Chief's name into its roster line and v2 rewrote that page, so a returning student who named their Chief got a plain keep-or-take question with no recommendation. Step 6.5's `name_seat.py --reapply` puts the recorded name back. Found in the 11-02 routes walk (route 7b, Team HQ plus Workforce Cohort 1). Test: `tests/update_roster_conflict.py`.
