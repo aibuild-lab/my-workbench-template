@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-02
+
+- `aibl-update` step 6: a conflict in `workforce/ROSTER.md` takes the program's copy without asking, the same as `registry.yaml` (Wade's ruling, 10-30). The first version's `name_seat.py` wrote the Chief's name into its roster line and v2 rewrote that page, so a returning student who named their Chief got a plain keep-or-take question with no recommendation. Step 6.5's `name_seat.py --reapply` puts the recorded name back. Found in the 11-02 routes walk (route 7b, Team HQ plus Workforce Cohort 1). Test: `tests/update_roster_conflict.py`.
+
 ## 2026-11-01
 
 - `aibl-update`, a returning Cohort 1 student's first update to the new Agent Workforce (Wade, 11-01, N4): before step 5's preview, when the workbench's commit has no `workforce/runtime/start_fresh.py`, the incoming edition has one, and the first version's course notes are there (read-only checks), the update says three lines, word for word: the course was overhauled from Cohort 1's feedback (new lessons in a new order, new pages on Learn, updated agents); everything they set up carries over (agents, the Chief of Staff's name, connections, library), and after the update it asks once whether to start the new version from the beginning (recommended) or keep going; and, partway through a week, they can finish the first version first. The preview's yes becomes "1. Update now (recommended) 2. Not now, I'll finish the first version first"; "Not now" changes nothing. Step 6.1's one question now marks starting from the beginning as recommended and names what keeps working. New `tests/returning_first_update.py`; `tests/joining_from.py` pins the new question.
