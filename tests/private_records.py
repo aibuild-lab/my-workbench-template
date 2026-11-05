@@ -121,7 +121,7 @@ class PrivateRecords(unittest.TestCase):
         text = claude.read_text()
         self.assertIn("2.5. **Bring in the template's privacy ignore lines.**", text)
         self.assertIn('follow it from step 2.5', text)
-        self.assertIn('do step 2.5 first', text)   # an older copy of this skill says "from step 3"
+        self.assertIn('do steps 2.5 and 2.6 first', text)   # an older copy of this skill says "from step 3"
         template = (ROOT / '.gitignore').read_text()
         missing = missing_template_lines(template, OLDER_GITIGNORE)
         self.assertFalse([line for line in missing if line.startswith('!')])
