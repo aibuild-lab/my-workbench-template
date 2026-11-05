@@ -3,6 +3,7 @@
 ## 2026-11-04
 
 - `aibl-update` no longer stops for lesson output (WF-6, decision 40). Step 1 stops only for something already staged, an unfinished merge, or unsaved changes in the core skills, the update check or `.gitignore`, and then asks "Save them now and continue the update? (yes / no)" and carries on in the same conversation. New step 2.6 offers to save everything else after the core refresh and the privacy lines, so the save uses the current `aibl-checkpoint` and job folders stay out of it. Step 5 asks again only for a file the program itself changes. `aibl-enroll` keeps its stop: it merges a whole program. Both copies identical; `tests/update_unsaved_work.py` runs the Git side on throwaway repositories.
+- `aibl-update` no longer guesses the student's next lesson (WF-119). Step 6.5's proof question to The Professor is now "Where am I in the course, and what's next?", and step 7 ends with one line taken from that reply. It never names a lesson, module or week from what the update brought. With no reply it says to ask The Professor. Both copies identical; `tests/update_close.py` pins the wording.
 
 ## 2026-11-02
 
