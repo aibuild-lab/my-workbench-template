@@ -101,3 +101,8 @@ test('an import attempted after expiry clears the validated input too', t => {
   assert.equal(refresh(root, { input: source, now: Date.parse(EXPIRES) }).status, 'expired');
   assert.equal(fs.statSync(source).size, 0);
 });
+test('root instructions stay free of course context, so students in other programs never run it', () => {
+  for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+    assert.doesNotMatch(fs.readFileSync(new URL('../' + name, import.meta.url), 'utf8'), /course-progress|course context/i);
+  }
+});
