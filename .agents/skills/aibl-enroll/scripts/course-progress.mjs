@@ -57,13 +57,13 @@ export function project(value, now = Date.now()) {
   const lessons = p?.lessons.map(({ id, week, done, recorded, checklist }) => ({ id, week, done, recorded,
     checklist: checklist == null ? null : { completed: checklist.completed, total: checklist.total } }));
   const real = lessons?.some(row => row.recorded);
-  const pending = lessons?.find(row => !row.done);
+  const pending = lessons?.find(row => !row.done && row.week > 0); // PROVISIONAL (P31): setup rows never hold a student back. To undo: drop `&& row.week > 0`.
   return {
     schema_version: SCHEMA, program: 'agent-workforce',
     student: { context: 'context/project.md', learn_user_id: value.student?.learn_user_id ?? null },
     cohort: { id: COHORT, label: 'AW2', starts_on: WEEKS[0], ends_on: '2026-12-05', timezone: 'America/New_York' },
     week_dates: WEEKS, calendar_week: calendar,
-    current_week: real ? Math.max(1, pending?.week ?? 4) : calendar,
+    current_week: real ? Math.min(Math.max(1, calendar), pending?.week ?? 4) : calendar, // PROVISIONAL (P31): never ahead of the weeks that have opened. To undo: `Math.max(1, pending?.week ?? 4)`.
     current_week_source: real ? 'learn-progress' : 'calendar-default',
     learn_progress: p == null ? null : { source: p.source, ownership_confirmed: true, read_at: p.read_at, lessons },
     generated_at: new Date(now).toISOString(), expires_at: EXPIRES,

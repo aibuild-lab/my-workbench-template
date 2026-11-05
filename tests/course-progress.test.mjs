@@ -20,13 +20,15 @@ function work(t) {
   fs.writeFileSync(path.join(root, '.gitignore'), '.aibl-local/\n');
   return root;
 }
-test('real progress wins both behind and ahead; refresh retains observation time', () => {
+test('real progress wins behind the calendar, never ahead of it (PROVISIONAL, P31); setup rows do not hold back; refresh retains observation time', () => {
   const value = snapshot();
   assert.equal(project(value, now).current_week, 1);
   value.learn_progress.lessons[0].done = true;
   assert.equal(project(value, now).current_week, 2);
   value.learn_progress.lessons[1].week = 4;
-  assert.equal(project(value, now).current_week, 4);
+  assert.equal(project(value, now).current_week, 3, 'Nov 16 opens Week 3, so an unfinished Week 4 row suggests Week 3');
+  value.learn_progress.lessons.unshift({ id: 'w0-before', week: 0, done: false, recorded: false });
+  assert.equal(project(value, now).current_week, 3, 'an unticked setup row does not pull the week back');
   const refreshed = project(value, now + 86400000);
   assert.equal(refreshed.learn_progress.read_at, new Date(now).toISOString());
   assert.notEqual(refreshed.generated_at, refreshed.learn_progress.read_at);
