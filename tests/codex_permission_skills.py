@@ -147,6 +147,8 @@ class SkillText:
         for command in spans(self.text):
             if command.strip() in {"&&", ";", "|"}:
                 continue
+            if command.startswith('python3 -c "'):
+                continue  # one command; step 7's temp folder example has a ; inside its quoted Python
             self.assertNotIn("&&", command)
             self.assertNotRegex(command, r";\s*\S", command)
             self.assertNotRegex(command, r"\s\|\s", command)

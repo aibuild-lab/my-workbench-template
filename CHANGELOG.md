@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-02
+
+- `aibl-update` step 6: a conflict in `workforce/ROSTER.md` takes the program's copy without asking, the same as `registry.yaml` (Wade's ruling, 10-30). The first version's `name_seat.py` wrote the Chief's name into its roster line and v2 rewrote that page, so a returning student who named their Chief got a plain keep-or-take question with no recommendation. Step 6.5's `name_seat.py --reapply` puts the recorded name back. Found in the 11-02 routes walk (route 7b, Team HQ plus Workforce Cohort 1). Test: `tests/update_roster_conflict.py`.
+
 ## 2026-11-01
 
 - `aibl-update` in Codex, every plain line (Wade, 11-01, N30): "Codex will ask you to allow it: choose Allow." is now "Codex may ask you to allow it. If it does, choose Allow.", and the network line is now "Codex may ask to use the network. If it does, choose Allow." Under Codex's Approve for me, its own reviewer often answers for the student, so no box comes. Both copies identical; `tests/codex_permission.py` and the waiting robot's check follow. `aibl-checkpoint` and `aibl-enroll` already say "If Codex asks you to allow ...", so they are unchanged.
