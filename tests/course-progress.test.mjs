@@ -58,7 +58,7 @@ test('import sanitizes arbitrary fields, clears input and never tracks the conte
   assert.ok(!raw.includes('untrusted_note'));
   assert.ok(!raw.includes('discard'));
   assert.deepEqual(JSON.parse(raw).learn_progress.lessons[0].checklist, { completed: 1, total: 3 });
-  assert.equal(fs.statSync(path.join(root, RELATIVE)).mode & 0o777, 0o600);
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(root, RELATIVE)).mode & 0o777, 0o600); // Windows has no such mode bits.
   assert.equal(execFileSync('git', ['ls-files', '--', RELATIVE], { cwd: root, encoding: 'utf8' }), '');
 });
 test('account changes, future timestamps, duplicate lessons, and missing ownership are rejected', t => {

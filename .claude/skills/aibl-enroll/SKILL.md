@@ -47,7 +47,7 @@ If the retained installer's `course-options.json` has an `enrollment` object for
 
 Never merge `main`, change permissions (other than step 6's previewed team settings, on a yes), send work, manufacture setup records, or push to a program remote. Student approval covers only the exact preview.
 
-## Temporary AW2 context / “where am I” refresh
+## Temporary AW2 context / "where am I" refresh
 
 This is separate from Git enrollment and never limits course files. After enrollment, offer it only if the student identifies their cohort as AW2 (Nov 2–Dec 5, 2026); GitHub repository access does not prove cohort membership. On their yes run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs --cohort aw2`. This creates calendar defaults only, with identity read from `context/project.md` and no claimed Learn completion.
 
