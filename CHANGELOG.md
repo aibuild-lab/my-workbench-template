@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-04
+
+- `aibl-update` no longer guesses the student's next lesson (WF-119). Step 6.5's proof question to The Professor is now "Where am I in the course, and what's next?", and step 7 ends with one line taken from that reply. It never names a lesson, module or week from what the update brought. With no reply it says to ask The Professor. Both copies identical; `tests/update_close.py` pins the wording.
+
 ## 2026-11-02
 
 - `aibl-update` step 6: a conflict in `workforce/ROSTER.md` takes the program's copy without asking, the same as `registry.yaml` (Wade's ruling, 10-30). The first version's `name_seat.py` wrote the Chief's name into its roster line and v2 rewrote that page, so a returning student who named their Chief got a plain keep-or-take question with no recommendation. Step 6.5's `name_seat.py --reapply` puts the recorded name back. Found in the 11-02 routes walk (route 7b, Team HQ plus Workforce Cohort 1). Test: `tests/update_roster_conflict.py`.
