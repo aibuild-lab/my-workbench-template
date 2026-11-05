@@ -98,7 +98,7 @@ export function refresh(root, { input, cohort, now = Date.now() } = {}) {
   const ignored = git(['check-ignore', '--no-index', '-q', '--', RELATIVE]);
   const tracked = git(['ls-files', '--', RELATIVE]);
   if (ignored.status !== 0 || tracked.status !== 0 || tracked.stdout.trim()) throw new Error('Course context must be ignored and untracked.');
-  let value;
+  let value, inputLeft = false;
   if (input) {
     const source = safeFile(path.dirname(path.resolve(input)), path.basename(input));
     value = parse(source);
@@ -110,7 +110,7 @@ export function refresh(root, { input, cohort, now = Date.now() } = {}) {
     }
     value = project(value, now);
     write(file, value);
-    if (source !== file) fs.writeFileSync(source, '', { mode: 0o600 });
+    if (source !== file) { try { fs.writeFileSync(source, '', { mode: 0o600 }); } catch { inputLeft = true; } }
   } else if (fs.existsSync(file) && fs.statSync(file).size) {
     value = project(parse(file), now);
     write(file, value);
@@ -119,7 +119,7 @@ export function refresh(root, { input, cohort, now = Date.now() } = {}) {
       student: { learn_user_id: null }, learn_progress: null, generated_at: new Date(now).toISOString(), expires_at: EXPIRES }, now);
     write(file, value);
   } else return { status: 'not_connected' };
-  return { status: 'refreshed', current_week: value.current_week, source: value.current_week_source };
+  return { status: 'refreshed', current_week: value.current_week, source: value.current_week_source, ...(inputLeft ? { input_left: true } : {}) };
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {

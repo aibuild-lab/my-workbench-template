@@ -106,3 +106,10 @@ test('root instructions stay free of course context, so students in other progra
     assert.doesNotMatch(fs.readFileSync(new URL('../' + name, import.meta.url), 'utf8'), /course-progress|course context/i);
   }
 });
+test('a download that cannot be cleared still imports and says so', t => {
+  const root = work(t), folder = fs.mkdtempSync(path.join(os.tmpdir(), 'aw2-downloads-')), source = path.join(folder, 'course-progress-import.json');
+  t.after(() => { fs.chmodSync(source, 0o644); fs.rmSync(folder, { recursive: true, force: true }); });
+  fs.writeFileSync(source, JSON.stringify(snapshot())); fs.chmodSync(source, 0o444);
+  assert.deepEqual(refresh(root, { input: source, now }), { status: 'refreshed', current_week: 1, source: 'learn-progress', input_left: true });
+  assert.ok(fs.statSync(path.join(root, RELATIVE)).size > 0);
+});
