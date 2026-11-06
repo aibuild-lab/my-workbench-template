@@ -37,6 +37,14 @@ class CombinedQuestion(unittest.TestCase):
         self.assertIn('as its own commit, "Keep private course records out of save points"', self.text)
         self.assertIn("A yes applies each step exactly as it is written below, with its own commit", self.section)
 
+    def test_a_plain_yes_is_the_one_answer(self):
+        self.assertIn('A plain yes, such as "take it", answers the whole list', self.section)
+
+    def test_other_questions_recommend_in_plain_words(self):
+        self.assertIn('Every question says in plain words what it does and which answer you recommend', self.text)
+        self.assertIn("It's for Claude Code, so it does nothing if you only use Codex", self.text)
+        self.assertIn('I recommend yes. Bring it in?', self.text)
+
     def test_no_quoting_the_skill(self):
         self.assertIn("Never tell the student a skill or a procedure requires something", self.text)
 

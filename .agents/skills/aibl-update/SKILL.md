@@ -21,7 +21,16 @@ These updates are ready. None of them changes how your team works:
 Take all the recommended updates? I can show you the details first. If you say no, everything stays as it is.
 ```
 
-If they ask for the details, show what they ask for: the diff, the exact lines, or the exact hook as JSON, then ask again. They can say yes to some and no to the rest. A no to any item keeps that item as it is. A copy that differs from every version the template shipped, or one you can't tell about, gets its own question after this one. If the student already answered this question in the update prompt, use that answer and don't ask again. A yes applies each step exactly as it is written below, with its own commit. The course update's preview in step 6, the team settings and the team note keep their own yes, because those change how things behave.
+A plain yes, such as "take it", answers the whole list: don't ask again about any item on it. If they ask for the details, show what they ask for: the diff, the exact lines, or the exact hook as JSON, then ask again. They can say yes to some and no to the rest. A no to any item keeps that item as it is. A copy that differs from every version the template shipped, or one you can't tell about, gets its own question after this one. If the student already answered this question in the update prompt, use that answer and don't ask again. A yes applies each step exactly as it is written below, with its own commit. The course update's preview in step 6, the team settings and the team note keep their own yes, because those change how things behave.
+
+## How the other questions read
+
+Keep each to a few plain lines, in these words or close to them. Offer the details; show them only if asked.
+
+- **The course update:** what it brings in two or three plain lines (for example new lessons, updated agents), "Your own work isn't touched. I recommend yes. Bring it in?"
+- **Team settings:** "This adds your team's rules, so your agents ask you before anything is sent. It's for Claude Code, so it does nothing if you only use Codex, and it's safe to say yes either way. I recommend yes. Add them?" Ask this in Codex too: you can't tell whether they also use Claude Code, and without it Claude Code has no ask-before-sending rules.
+- **The team note:** the line in step 7, then "I recommend yes." After their yes, say what the note tells their assistant in one or two plain lines and offer to show it, then ask "Add it?"
+- **The home workbench record:** "This writes one small file outside the workbench, so your agents can find your team from other folders. I recommend yes. Record it?"
 
 ## Steps
 
@@ -57,6 +66,7 @@ If they ask for the details, show what they ask for: the diff, the exact lines, 
 
 ## Rules
 
+- **Every question says in plain words what it does and which answer you recommend.** Don't show a raw block (`.gitignore` lines, JSON, a diff), a commit hash or a version id unless they ask; offer them instead.
 - **Never tell the student a skill or a procedure requires something.** Don't end a question with lines like "The update skill requires a separate yes", don't quote this file, and don't name its steps. Say in plain words what the student is choosing and why it's safe.
 - Program merges use only verified `<remote>/student`; `template/main` is used only for the approved core-file refresh.
 - Never merge over a dirty tree, overwrite ignored files, resolve a surprise conflict, or apply a changed preview without a new decision.

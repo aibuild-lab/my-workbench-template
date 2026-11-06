@@ -2,7 +2,7 @@
 
 ## 2026-11-06, one combined question
 
-- `aibl-update`: steps 2, 2.5 and 3 ask once, together: "Take all the recommended updates? I can show you the details first." A customized copy or one it can't tell about still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update's preview, team settings and team note keep their own yes. What a yes writes is unchanged. And a new rule: never tell the student a skill or procedure requires something; say what they're choosing and why it's safe. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200). **PROVISIONAL, for Wade to read.** Undo: revert this commit; it pairs with `UPDATE-PROMPT.md` in `aibl-installer`.
+- `aibl-update`: steps 2, 2.5 and 3 ask once, together: "Take all the recommended updates? I can show you the details first." A customized copy or one it can't tell about still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update's preview, team settings and team note keep their own yes. What a yes writes is unchanged. And a new rule: never tell the student a skill or procedure requires something; say what they're choosing and why it's safe. Every question says in plain words what it does and which answer is recommended, with no raw block, hash or version id unless they ask, and the settings question says it's for Claude Code. A plain yes answers the whole combined question. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200). **PROVISIONAL, for Wade to read.** Undo: revert this commit; it pairs with `UPDATE-PROMPT.md` in `aibl-installer`.
 
 ## 2026-11-06
 
