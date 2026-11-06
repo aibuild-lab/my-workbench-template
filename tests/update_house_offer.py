@@ -28,6 +28,9 @@ class HouseOffer(unittest.TestCase):
     def test_once_and_a_no_changes_nothing(self):
         self.assertIn("On a no, change nothing and never offer it again in this update", self.offer)
 
+    def test_applies_after_the_update_prompt(self):
+        self.assertIn("even if you came here from the update prompt", self.offer)
+
     def test_same_writes_as_enroll(self):
         self.assertIn("exactly as `aibl-enroll` step 7 describes", self.offer)
         self.assertIn("Any other change stops.", self.offer)
