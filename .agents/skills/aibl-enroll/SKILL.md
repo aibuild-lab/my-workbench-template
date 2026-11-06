@@ -47,6 +47,16 @@ If the retained installer's `course-options.json` has an `enrollment` object for
 
 Never merge `main`, change permissions (other than step 6's previewed team settings, on a yes), send work, manufacture setup records, or push to a program remote. Student approval covers only the exact preview.
 
+## Temporary AW2 context / “where am I” refresh
+
+This is separate from Git enrollment and never limits course files. After enrollment, offer it only if the student identifies their cohort as AW2 (Nov 2–Dec 5, 2026); GitHub repository access does not prove cohort membership. On their yes run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs --cohort aw2`. This creates calendar defaults only, with identity read from `context/project.md` and no claimed Learn completion.
+
+For actual Learn progress, the student signs in to Learn themselves, opens the Workforce home and chooses **Download course context**. Learn verifies their enrolled AW2 seat through its existing signed-in `my-cohorts` call. They must confirm that this browser's saved ticks are theirs: these ticks have no server copy and are shared by accounts using that browser. Ask them to save the export inside `.aibl-local/`, then run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs --import <exact-export-path>`. No token or cookie is copied. A successful import clears the input file in place, leaving only `.aibl-local/course-progress.json`. Do not copy or print the payload, upload it, checkpoint it, or import someone else's export. This is a personal Learn browser snapshot, not a signed server attestation or proof an assessment passed. Never scrape a browser profile or ask for credentials. If the download is unavailable, explain that and retain calendar defaults; do not invent progress.
+
+Later run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs` to recompute the date fallback and scrub expired/invalid context. To get newly changed Learn ticks, download and import again. `learn_progress.read_at` stays the original observation time; a local refresh does not claim a new Learn read. When records exist, the first unfinished lesson determines the suggested week even if the calendar is ahead or behind. An empty Learn history uses the calendar. Local lesson evidence and the student's corrections still govern teaching; this file awards no completion.
+
+The cutoff is the end of Dec 5 Eastern (`2026-12-06T05:00:00.000Z`, exclusive). Check it before every use, including in an already open conversation. Never copy any of this temporary context into durable memory, notes, handoffs, agent records or Git. The session-start check clears the file in place after expiry, including resume/compact; other harnesses run the command before course guidance. There is no background watcher: an offline or closed workbench clears it on next invocation, and old conversations/downloads/backups outside this path cannot be erased by this tool. The student must remove any unimported exports and avoid copies.
+
 ## Attribution
 
 Original AIBL method. MIT, like the rest of this template.
