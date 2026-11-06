@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-06, one combined question
+
+- `aibl-update`: steps 2, 2.5 and 3 ask once, together: "Take all the recommended updates? I can show you the details first." A customized copy or one it can't tell about still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update's preview, team settings and team note keep their own yes. What a yes writes is unchanged. And a new rule: never tell the student a skill or procedure requires something; say what they're choosing and why it's safe. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200). **PROVISIONAL, for Wade to read.** Undo: revert this commit; it pairs with `UPDATE-PROMPT.md` in `aibl-installer`.
+
 ## 2026-11-06
 
 - `aibl-update` step 7: "Tell my assistant about my team" is now also offered whenever the root `AGENTS.md` has no `house:begin` line, not only when the update changed `workforce/HOUSE.md`, and step 4 makes the offer even when no program has an update. Same yes, preview and writes as `aibl-enroll` step 7; offered once per update, and a no changes nothing and isn't asked again in that update. Why: in `codex exec`, a workbench without the block got a stand-in that said "I'm the Professor" with no agent launched (2 of 3 for `@aibl-the-professor hello`, 1 of 1 for `professor`), and a student who said no stayed without it. **PROVISIONAL, for Wade to read before merging (11-06-2026):** the condition, the "next update asks again" rule and the line "Your assistant doesn't know about your team yet, so it may answer as one of your agents instead of bringing the real one in. Want me to tell it?" Undo: revert this commit; it touches only the two skill copies, this entry and `tests/update_house_offer.py`.
