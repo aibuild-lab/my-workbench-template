@@ -30,13 +30,13 @@
 //   its next new conversation. The preview writes nothing; adding the settings is aibl-update's job.
 //
 // Rules, borrowed from the Camp update check that ran for months:
-//   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
-//      Its only writes are --agent-menu-apply, --home-workbench-apply and --camp-record, outside
+//   1. It never changes tracked workbench files. Fetch only. Merging is aibl-update's job, after a yes.
+//      Its other writes are --agent-menu-apply, --home-workbench-apply and --camp-record, outside
 //      the workbench, which aibl-update and aibl-enroll run only after the student's yes or answer,
 //      and --joining-from's Camp record on a verified Camp sign (the line it is about to hear).
-//      The hook itself never writes.
+//      The hook only scrubs invalid/expired `.aibl-local/course-progress.json`; it never saves course context to history.
 //   2. It never blocks a session: every path exits 0, and a broken check stays quiet.
-//   3. New conversations only. resume, compact and fork continue one that already heard
+//   3. Fetches on new conversations only; local expiry also runs on resume/compact. These continue one that already heard
 //      the answer; a subagent lives inside a conversation that already heard it.
 //   4. One conversation hears it once (a claim marker keyed by session and workbench).
 //   5. Hook and skill cannot drift, because there is only this file.
@@ -239,6 +239,9 @@ const CASE_BLIND = WINDOWS || process.platform === "darwin";
 // Finder and Explorer litter that never makes a skill copy "changed"
 const TREE_NOISE = new Set([".DS_Store", "Thumbs.db", "__pycache__"]);
 
+let expireCourseContext = () => {};
+try { ({ expire: expireCourseContext } = await import("../skills/aibl-enroll/scripts/course-progress.mjs")); } catch { /* older template; root instructions still reject expired data */ }
+
 main();
 
 function main() {
@@ -297,12 +300,13 @@ function replaceEditedArgs() {
 }
 
 function hook() {
-  if (isTruthy(process.env.AIBL_SKIP_UPDATE_CHECK)) return;
   const payload = readPayload();
+  const root = resolveRoot(payload);
+  if (root) expireCourseContext(root); // Local expiry runs even when update fetching is skipped.
+  if (isTruthy(process.env.AIBL_SKIP_UPDATE_CHECK)) return;
   const source = typeof payload.source === "string" ? payload.source : "startup";
   if (!NEW_CONVERSATION_SOURCES.has(source)) return;
   if (payload.agent_type) return;
-  const root = resolveRoot(payload);
   if (!root) return;
   if (!claimThisConversation(payload.session_id, root)) return;
   const report = check(root);
