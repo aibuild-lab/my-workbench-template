@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-06, private records
+
+- `aibl-update` step 1: untracked paths under `runs/`, `quarantine/`, `logs/` or `library/originals/` no longer stop the update or go to `aibl-checkpoint`. `aibl-checkpoint` step 2: when private records are already tracked, it offers to stop including them, on the student's yes, with the files left on this computer, instead of only stopping. `aibl-checkpoint` also gets the rule against telling the student a skill requires something. Why: on a workbench older than the template's `runs/` ignore line, the update's stop led to job records being pushed to the private GitHub copy, and the next checkpoint then stopped with no route offered (D199). **PROVISIONAL, for Wade to read.** Undo: revert this commit.
+
 ## 2026-11-06, one combined question
 
 - `aibl-update`: steps 2, 2.5 and 3 ask once, together: "Take all the recommended updates? I can show you the details first." A customized copy or one it can't tell about still gets its own question, the student can ask to see any item, and a no keeps it as it is. The course update's preview, team settings and team note keep their own yes. What a yes writes is unchanged. And a new rule: never tell the student a skill or procedure requires something; say what they're choosing and why it's safe. Every question says in plain words what it does and which answer is recommended, with no raw block, hash or version id unless they ask, and the settings question says it's for Claude Code. A plain yes answers the whole combined question. Why: a first-version update asked 9 questions and took 10 minutes in a `codex exec` walk (D200). **PROVISIONAL, for Wade to read.** Undo: revert this commit; it pairs with `UPDATE-PROMPT.md` in `aibl-installer`.
