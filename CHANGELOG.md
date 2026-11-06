@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-06
+
+- `aibl-update` step 7: "Tell my assistant about my team" is now also offered whenever the root `AGENTS.md` has no `house:begin` line, not only when the update changed `workforce/HOUSE.md`, and step 4 makes the offer even when no program has an update. Same yes, preview and writes as `aibl-enroll` step 7; offered once per update, and a no changes nothing and isn't asked again in that update. The Codex table gains the block's commit row, which the step already named as a permissioned write. Why: in `codex exec`, a workbench without the block got a stand-in that said "I'm the Professor" with no agent launched (2 of 3 for `@aibl-the-professor hello`, 1 of 1 for `professor`), and a student who said no stayed without it. **PROVISIONAL, for Wade to review (11-06-2026):** the condition, the "next update asks again" rule and the line "Your assistant doesn't know about your team yet, so it may answer as one of your agents instead of bringing the real one in. Want me to tell it?" Undo: revert this commit; it touches only the two skill copies, this entry and `tests/update_house_offer.py`.
+
 ## 2026-11-02
 
 - `aibl-update` step 6: a conflict in `workforce/ROSTER.md` takes the program's copy without asking, the same as `registry.yaml` (Wade's ruling, 10-30). The first version's `name_seat.py` wrote the Chief's name into its roster line and v2 rewrote that page, so a returning student who named their Chief got a plain keep-or-take question with no recommendation. Step 6.5's `name_seat.py --reapply` puts the recorded name back. Found in the 11-02 routes walk (route 7b, Team HQ plus Workforce Cohort 1). Test: `tests/update_roster_conflict.py`.
