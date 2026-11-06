@@ -31,6 +31,10 @@ class HouseOffer(unittest.TestCase):
     def test_applies_after_the_update_prompt(self):
         self.assertIn("even if you came here from the update prompt", self.offer)
 
+    def test_asks_before_preparing(self):
+        self.assertIn("Prepare nothing until the student answers that line", self.offer)
+        self.assertIn("make the temporary folder with the permission asked", self.offer)
+
     def test_same_writes_as_enroll(self):
         self.assertIn("exactly as `aibl-enroll` step 7 describes", self.offer)
         self.assertIn("Any other change stops.", self.offer)
