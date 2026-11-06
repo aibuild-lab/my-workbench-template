@@ -24,7 +24,8 @@ class CombinedQuestion(unittest.TestCase):
         self.assertIn("Take all the recommended updates? I can show you the details first. If you say no, everything stays as it is.", self.section)
 
     def test_customized_copy_keeps_its_own_question(self):
-        self.assertIn("gets its own question after this one", self.section)
+        self.assertIn("in its own message after the student has answered this one, and a yes here never covers it", self.section)
+        self.assertIn("Yes or no here, go on to them", self.section)
 
     def test_the_prompts_answer_carries_over(self):
         self.assertIn("already answered this question in the update prompt, use that answer", self.section)
