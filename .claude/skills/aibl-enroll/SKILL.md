@@ -1,6 +1,6 @@
 ---
 name: aibl-enroll
-description: Add an accessible program to your existing workbench after showing the exact changes and receiving your approval.
+description: Add an accessible program to your existing workbench after showing the exact changes and receiving your approval. Also imports the course progress file downloaded from Learn, when the student asks to import their course progress.
 ---
 
 # Connect your program
@@ -46,6 +46,16 @@ If the retained installer's `course-options.json` has an `enrollment` object for
    Ask the student to start a new session in the same folder, then run the program's entry skill from the table (slash skill in Claude, dollar-sign skill in Codex). Where the program supplies named agents, check actual named-agent discovery and a real response using the installed program's supported instructions. A program with no agents yet is checked by its entry skill answering from its own contents list (`lab/CONTENTS.md` for The Lab). Missing discovery stops for diagnosis. Never write outside the workbench except the three offers above, each on its own yes. Offer `aibl-checkpoint` for the student's private origin, separately from enrollment.
 
 Never merge `main`, change permissions (other than step 6's previewed team settings, on a yes), send work, manufacture setup records, or push to a program remote. Student approval covers only the exact preview.
+
+## Temporary AW2 context / "where am I" refresh
+
+This is separate from Git enrollment and never limits course files. After enrollment, offer it only if the student identifies their cohort as AW2 (Nov 2–Dec 5, 2026); GitHub repository access does not prove cohort membership. On their yes run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs --cohort aw2`. This creates calendar defaults only, with identity read from `context/project.md` and no claimed Learn completion.
+
+For actual Learn progress, the student signs in to Learn themselves, opens the Workforce home and chooses **Download my course progress** (step 1 of that card says to update the workbench first, with the update paste on Week 0 card 0.3). Learn verifies their enrolled AW2 seat through its existing signed-in `my-cohorts` call. They must confirm that this browser's saved ticks are theirs: these ticks have no server copy and are shared by accounts using that browser. The browser puts the export in their Downloads folder, named `course-progress-import.json` (or with a number if there is an older one). Never ask them to make a folder or move the file. Run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs --import <that path>`. If the result says `input_left`, the import worked but the download could not be cleared: give them the exact file name and folder you imported from, and ask them to delete that file. No token or cookie is copied. A successful import clears the input file in place, leaving only `.aibl-local/course-progress.json`. Do not copy or print the payload, upload it, checkpoint it, or import someone else's export. This is a personal Learn browser snapshot, not a signed server attestation or proof an assessment passed. Never scrape a browser profile or ask for credentials. If the download is unavailable, explain that and retain calendar defaults; do not invent progress.
+
+Later run `node .claude/skills/aibl-enroll/scripts/course-progress.mjs` to recompute the date fallback and scrub expired/invalid context. To get newly changed Learn ticks, download and import again. `learn_progress.read_at` stays the original observation time; a local refresh does not claim a new Learn read. When records exist, the first unfinished lesson after setup determines the suggested week, never later than the week the calendar has opened. An empty Learn history uses the calendar. Local lesson evidence and the student's corrections still govern teaching; this file awards no completion.
+
+The cutoff is the end of Dec 5 Eastern (`2026-12-06T05:00:00.000Z`, exclusive). Check it before every use, including in an already open conversation. Never copy any of this temporary context into durable memory, notes, handoffs, agent records or Git. The session-start check clears the file in place after expiry, including resume/compact; other harnesses run the command before course guidance. There is no background watcher: an offline or closed workbench clears it on next invocation, and old conversations/downloads/backups outside this path cannot be erased by this tool. The student must remove any unimported exports and avoid copies.
 
 ## Attribution
 
