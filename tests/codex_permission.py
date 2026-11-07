@@ -172,7 +172,7 @@ class SkillText(unittest.TestCase):
                          '"Next I bring Week 2 into your workbench\'s history. Codex may ask you to allow it. If it does, choose Allow."')
 
     def test_no_command_is_joined_to_another(self):
-        blocks = re.findall(r"```\n(.*?)```", self.text, flags=re.S)
+        blocks = re.findall(r"```[a-z]*\n(.*?)```", self.text, flags=re.S)
         for command in spans(self.text) + [l for b in blocks for l in b.splitlines()]:
             if command.strip() in {"&&", ";", "|"}:
                 continue

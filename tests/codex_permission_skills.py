@@ -24,11 +24,13 @@ SAVE = "If Codex asks you to allow a save to your workbench's history, that's th
 STEP = "If Codex asks you to allow it, that's this step; choose to allow it."
 AGENT = "If Codex asks you to allow a change to your agent files, that's this step; choose to allow it."
 GIT_READS = {"status", "diff", "log", "show", "rev-parse", "ls-tree", "merge-base", "cat-file", "ls-files", "remote get-url"}
-GIT_WRITES = {"remote add", "fetch", "checkout", "merge", "commit", "add", "merge --abort", "push", "pull", "config"}
+GIT_WRITES = {"remote add", "fetch", "checkout", "merge", "commit", "add", "merge --abort", "push", "pull", "config", "rm"}
 GH_WRITES = {"gh auth setup-git"}
 NEVER = {"reset", "stash"}  # named only to forbid them
-SCRIPT_WRITES = ["--camp-record", "--home-workbench-apply", "mark-v2", "name_seat.py --reapply", "compile-house.py"]
-SCRIPT_NO_PERMISSION = ["--joining-from", "--home-workbench", "settings-merge.mjs", "course-progress.mjs"]
+SCRIPT_WRITES = ["--camp-record", "--home-workbench-apply", "mark-v2", "name_seat.py --reapply", "compile-house.py",
+                 "privacy_check.py untrack", "staged --unstage"]
+SCRIPT_NO_PERMISSION = ["--joining-from", "--home-workbench", "settings-merge.mjs", "course-progress.mjs",
+                        "privacy_check.py gate", "privacy_check.py staged", "privacy_check.py ignore"]
 CARRY_ON = ("Then carry on", "carry on.")
 
 
