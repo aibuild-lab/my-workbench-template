@@ -97,6 +97,8 @@ Keep each to a few plain lines, in these words or close to them. Offer the detai
 
    Offer a checkpoint to the student's private origin only. Start a new session in the same folder and verify an actual named-agent response through the installed supported route. Do not switch clients or call file presence runtime success.
 
+   End with one line on where the student goes next: "To pick up where you left off, ask The Professor where you are in the course." It comes last, after the line about quitting the app when step 6.5 gives one. Never name a lesson, module or week as the student's next step from what this update brought, the newest files or the commit messages: an update often brings weeks the student hasn't reached, and the agent step 6.5 heard from still runs its file from before this update. When the student's own request asks whether a week arrived, answer that from the files on disk, in its own line. A student who said yes to Start fresh in step 6.1 has the Start fresh box as their next step instead. A program without The Professor (The Lab today) gets no such line.
+
 ## Rules
 
 - **Every question says in plain words what it does and which answer you recommend.** Don't show a raw block (`.gitignore` lines, JSON, a diff), a commit hash or a version id unless they ask; offer them instead.
