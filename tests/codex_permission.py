@@ -25,7 +25,7 @@ SECTION = "## In Codex: one permission for each protected write"
 
 # Every git verb the skill names, sorted into writes and reads. A verb in neither list fails the test,
 # so a new command has to be classified (and, if it writes, put in the table) before it can ship.
-GIT_READS = {"status", "log", "diff", "show", "rev-parse", "ls-tree", "merge-base", "cat-file", "ls-files",
+GIT_READS = {"status", "log", "diff", "show", "rev-parse", "rev-list", "ls-tree", "merge-base", "cat-file", "ls-files",
              "remote get-url"}
 GIT_WRITES = {"remote add", "fetch", "checkout", "merge", "commit", "add", "revert", "merge --abort"}
 # Scripts the skill runs: those in the table write a protected place; the others are named here with

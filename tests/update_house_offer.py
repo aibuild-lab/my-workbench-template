@@ -22,7 +22,7 @@ class HouseOffer(unittest.TestCase):
 
     def test_offered_when_missing_or_changed(self):
         self.assertIn("has no `house:begin` line", self.offer)
-        self.assertIn("`git diff --name-only <pre-update commit> HEAD -- workforce/HOUSE.md`", self.offer)
+        self.assertIn("`git rev-parse <pre-update commit>:workforce/HOUSE.md` and `git rev-parse HEAD:workforce/HOUSE.md` differ", self.offer)
         self.assertIn("workforce/house/compile-house.py", self.offer)
 
     def test_once_and_a_no_changes_nothing(self):
