@@ -31,10 +31,16 @@ class UpdateClose(unittest.TestCase):
 
     def test_the_close_is_the_fallback_line_and_never_names_a_lesson_from_what_arrived(self):
         rules = self.text.split("\n7. **Verify what arrived.**", 1)[1].split("\n## Rules", 1)[0]
-        self.assertIn('"To pick up where you left off, ask The Professor where you are in the course."', rules)
+        self.assertIn('"To pick up where you left off, open a new conversation with the Professor and ask where you are in the course."', rules)
         self.assertIn("Never name a lesson, module or week as the student's next step from what this update brought", rules)
         self.assertIn("A program without The Professor (The Lab today) gets no such line.", rules)
         self.assertIn("A student who said yes to Start fresh in step 6.1", rules)
+
+    def test_the_agent_menu_step_does_not_say_codex_has_no_menu(self):
+        # D174, D182: Codex has an agent list on this version; the step is still Claude Code's alone.
+        step = self.text.split("6.5. **Make the update live.**", 1)[1].split("\n7. **Verify what arrived.**", 1)[0]
+        self.assertIn("(Claude Code only; skip this in Codex)", step)
+        self.assertNotIn("Codex has no such menu", self.text)
 
     def test_no_em_or_en_dashes(self):
         self.assertNotIn("—", self.text)
