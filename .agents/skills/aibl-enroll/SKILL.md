@@ -1,6 +1,6 @@
 ---
 name: aibl-enroll
-description: Add an accessible program to your existing workbench after showing the exact changes and receiving your approval.
+description: Add an accessible program to your existing workbench after showing the exact changes and receiving your approval. Also imports the course progress file downloaded from Learn, when the student asks to import their course context.
 ---
 
 # Connect your program
