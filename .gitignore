@@ -1,6 +1,5 @@
 # Local-only files
 .aibl-local/
-course-progress-import*.json
 .env
 .env.*
 !.env.example
