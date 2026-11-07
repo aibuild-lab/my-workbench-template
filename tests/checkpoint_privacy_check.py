@@ -28,7 +28,8 @@ STAMPS = ('.aibl/programs/agent-workforce.json', '.aibl/workforce-student-editio
 REFUSAL = ('"I didn\'t save. This workbench has Agent Workforce, but the course\'s privacy check '
            '(workforce/runtime/privacy_check.py) is missing, so I can\'t make sure your customer mail and job records '
            'stay out of the save. To bring it back, run the update paste on Agent Workforce card 0.3, Get your '
-           'organization, in Learn. Then ask me to save again."')
+           'organization, in Learn. Then ask me to save again. If you see this again after the update, post in the '
+           'course channel and the course team will help you bring it back."')
 
 
 def read():
@@ -77,10 +78,13 @@ class Text(unittest.TestCase):
         text = read()
         self.assertIn('When a stamp exists but `workforce/runtime/privacy_check.py` does not, refuse: make no save, '
                       'stage nothing, and say in plain words: ' + REFUSAL, text)
+        # An update does not bring back a check the student's own history deleted, unless that update changes
+        # the file (then it is a keep-mine or take-the-program's choice), so the refusal also names the course channel.
+        self.assertIn('Give no Git commands for bringing the file back.', text)
         self.assertIn("A missing check never counts as a pass: don't fall back to step 2's list alone, and never write, "
-                      'copy or download the check yourself. Nothing is deleted or moved.', text)
-        self.assertNotIn('—', text)
-        self.assertNotIn('–', text)
+                      'copy, download or restore the check yourself. Nothing is deleted or moved.', text)
+        self.assertNotIn(chr(0x2014), text)   # no em dash
+        self.assertNotIn(chr(0x2013), text)   # no en dash
 
     def test_step_two_is_unchanged(self):
         # Workbenches without the course check keep today's list check, word for word.
