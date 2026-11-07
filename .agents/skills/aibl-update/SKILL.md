@@ -63,7 +63,7 @@ Keep each to a few plain lines, in these words or close to them. Offer the detai
 - **The course update:** what it brings in two or three plain lines (for example new lessons, updated agents), "Your own work isn't touched. I recommend yes. Bring it in?"
 - **Team settings:** "This adds your team's rules, so your agents ask you before anything is sent. It's for Claude Code, so it does nothing if you only use Codex, and it's safe to say yes either way. I recommend yes. Add them?" Ask this in Codex too: you can't tell whether they also use Claude Code, and without it Claude Code has no ask-before-sending rules.
 - **The team note:** the line in step 7, then "I recommend yes." After their yes, say what the note tells their assistant in one or two plain lines and offer to show it, then ask "Add it?"
-- **The home workbench record:** "This writes one small file outside the workbench, so your agents can find your team from other folders. I recommend yes. Record it?"
+- **The home workbench record:** "This writes one small file outside the workbench that records this folder as your team's home, where its registry, charter and receipts stay. Start your agents in this folder. I recommend yes. Record it?"
 
 ## Steps
 

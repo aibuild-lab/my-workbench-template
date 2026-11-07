@@ -2,6 +2,7 @@
 
 ## 2026-11-07, Week 2 branch brought up to date with main
 
+- `aibl-update`'s home workbench question no longer says the record lets the agents find the team from other folders. It now says the record marks this folder as the team's home and to start the agents here, matching `aibl-enroll`'s offer (from a parent or other folder, Codex doesn't find them). `tests/home_workbench_line.py` keeps the "any folder" claim out of both skills.
 - `aibl-update` step 7 ends with one line: "To pick up where you left off, ask The Professor where you are in the course." It never names a lesson, module or week as the next step from what the update brought (WF-119). Step 6.5's proof still asks the agent only its name (D160), because an agent called from the update's session runs its file from before the update, so WF-119's "Where am I in the course" proof question is not used. PROVISIONAL; undo: revert this commit. `tests/update_close.py` pins it.
 - Merged main (#36 to #41) into the Week 2 template branch with a merge commit. `aibl-checkpoint` in Codex: the three writes main added to a save (step 2's `git rm --cached`, step 2.5's `privacy_check.py untrack`, step 4's `privacy_check.py staged --unstage`) each have a row in the "In Codex" table and a marker in their step. `tests/codex_permission.py` reads a fenced block that names a language.
 
