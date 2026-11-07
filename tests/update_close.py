@@ -42,6 +42,12 @@ class UpdateClose(unittest.TestCase):
         self.assertIn("(Claude Code only; skip this in Codex)", step)
         self.assertNotIn("Codex has no such menu", self.text)
 
+    def test_a_refused_menu_copy_is_one_line_and_never_sends_to_permission_settings(self):
+        # A walk (11-07) had the update tell the student to add a rule in Claude Code's permission settings.
+        step = self.text.split("6.5. **Make the update live.**", 1)[1].split("\n7. **Verify what arrived.**", 1)[0]
+        self.assertIn('"I skipped the copy for your agent menu. Nothing is lost, and your agents still work when you ask for them by name."', step)
+        self.assertIn("Never send the student to the app's permission settings", step)
+
     def test_no_em_or_en_dashes(self):
         self.assertNotIn("—", self.text)
         self.assertNotIn("–", self.text)
