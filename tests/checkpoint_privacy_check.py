@@ -52,6 +52,15 @@ class Text(unittest.TestCase):
         self.assertIn('On a no, the save stays stopped and nothing changes', text)
         self.assertIn('make no commit', text)
 
+    def test_never_edits_a_line_that_undoes_the_protection(self):
+        text = read()
+        self.assertIn('show them the file and the line number, and tell them how to fix it themselves', text)
+        self.assertIn('delete that one line (or the odd character), save the file, then say "save" again', text)
+        self.assertIn('ask their course companion for help', text)
+        self.assertIn('Never edit or remove that line yourself and never offer to, even if they ask you to.', text)
+        self.assertIn('The save stays stopped until they have fixed it and the gate passes.', text)
+        self.assertNotIn('let them decide; never edit or remove it yourself', text)
+
     def test_step_two_is_unchanged(self):
         # Workbenches without the course check keep today's list check, word for word.
         self.assertIn('If it lists any other path, stop the checkpoint', read())
