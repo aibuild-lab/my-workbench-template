@@ -12,7 +12,7 @@ The moment is told apart with read-only checks only: the workbench's commit has 
 script, the incoming edition has one, and the first version's course notes are there. The Git part
 of that is run here on a first-version and a new-version workbench.
 """
-import re, subprocess, tempfile, unittest
+import os, re, subprocess, tempfile, unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +23,13 @@ L3 = "Partway through a week and want to finish the first version first? Choose 
 CHOICE = "1. Update now (recommended) 2. Not now, I'll finish the first version first"
 NOTNOW = "Nothing changed. When you've finished, ask me to update, or say yes when I offer it in a new conversation."
 SCRIPT = "workforce/runtime/start_fresh.py"
+# Student P (11-09): a Cohort 2 first-timer who enrolled on the first version's files and did Week 1 there was
+# told the course was overhauled from Cohort 1's feedback and asked to start from the beginning. Only notes
+# saved before Cohort 2 opened are Cohort 1's.
+COHORT2_CHECK = ("`git rev-list -1 --before=2026-10-26T00:00:00 HEAD -- work/course/staff/progress.md work/course/staff/founder-brief.md "
+                 "work/course/staff/before-picture.md ':(glob)work/course/staff/**/continuation*.json' ':(glob)work/course/staff/first-run/**'` prints a commit")
+NOTE_SPECS = ["work/course/staff/progress.md", "work/course/staff/founder-brief.md", "work/course/staff/before-picture.md",
+              ":(glob)work/course/staff/**/continuation*.json", ":(glob)work/course/staff/first-run/**"]
 
 
 def skill():
@@ -67,6 +74,15 @@ class Words(unittest.TestCase):
         self.assertIn("holds course notes from the first version's lessons", five)
         self.assertIn("hears none of this", five)
 
+    def test_a_cohort_2_first_timer_is_never_told_to_start_over(self):
+        five, six_one = step(skill(), "5"), step(skill(), "6.1")
+        self.assertIn("and one of them was saved before Cohort 2 opened: " + COHORT2_CHECK + ".", five)
+        self.assertIn("so they are never told to start over", five)
+        self.assertIn("a Cohort 2 student whose notes were all saved on or after 10-26-2026) hears none of this.", five)
+        self.assertIn("and only when step 5's Cohort 2 check", six_one)
+        self.assertIn("A Cohort 2 student is taking the course for the first time, so they are never asked, whatever the state says.", six_one)
+        self.assertNotIn("git log", COHORT2_CHECK)  # read-only and off the ask list (D232)
+
     def test_the_question_recommends_starting_fresh_and_can_open_with_the_first_line(self):
         six_one = step(skill(), "6.1")
         self.assertIn("1. Yes, start from the beginning (recommended) 2. No, keep going as I am\"", six_one)
@@ -85,18 +101,26 @@ class TheMoment(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
-    def commit(self, repo, files, message):
+    def commit(self, repo, files, message, date=None):
         for name, body in files.items():
             p = repo / name
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(body, encoding="utf-8")
         self.git(repo, "add", "-A")
-        self.git(repo, "commit", "-qm", message)
+        if date:
+            stamp = date + "T12:00:00"
+            r = subprocess.run(["git", "-C", str(repo), "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+                                "-c", "commit.gpgsign=false", "commit", "-qm", message], capture_output=True, text=True,
+                               timeout=120, env=dict(os.environ, GIT_AUTHOR_DATE=stamp, GIT_COMMITTER_DATE=stamp))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        else:
+            self.git(repo, "commit", "-qm", message)
 
     def is_first_update(self, wb):
         has = lambda ref: self.git(wb, "cat-file", "-e", f"{ref}:{SCRIPT}", check=False).returncode == 0
         notes = any((wb / "work/course/staff" / n).exists() for n in ("progress.md", "founder-brief.md", "before-picture.md"))
-        return not has("HEAD") and has("agent-workforce/student") and notes
+        early = self.git(wb, "rev-list", "-1", "--before=2026-10-26T00:00:00", "HEAD", "--", *NOTE_SPECS).stdout.strip()
+        return not has("HEAD") and has("agent-workforce/student") and notes and bool(early)
 
     def test_a_first_version_workbench_with_notes_is_the_moment_and_a_new_version_one_is_not(self):
         with tempfile.TemporaryDirectory() as d:
@@ -110,7 +134,7 @@ class TheMoment(unittest.TestCase):
                 self.git(wb, "remote", "add", "agent-workforce", str(course))
                 self.git(wb, "fetch", "-q", "agent-workforce", "student")
                 self.git(wb, "merge", "-q", "--allow-unrelated-histories", "-m", "Add Agent Workforce", "agent-workforce/student")
-                self.commit(wb, {"work/course/staff/progress.md": "Lesson 3 done\n"}, "Save my work")
+                self.commit(wb, {"work/course/staff/progress.md": "Lesson 3 done\n"}, "Save my work", date="2026-09-25")
             self.commit(course, {SCRIPT: "# start fresh\n"}, "New version")
             for wb in (v1, v2):
                 self.git(wb, "fetch", "-q", "agent-workforce", "student")
@@ -119,6 +143,27 @@ class TheMoment(unittest.TestCase):
             self.assertFalse(self.is_first_update(v2))          # already on the new version
             (v1 / "work/course/staff/progress.md").unlink()       # never saved a lesson: nothing to say
             self.assertFalse(self.is_first_update(v1))
+
+    def test_a_cohort_2_first_timer_on_the_first_version_files_is_not_the_moment(self):
+        """Student P: enrolled on the first version's branch, Week 1 saved 11-02 to 11-08: a first run, not a return."""
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            course, wb = base / "course", base / "wb"
+            for repo, branch in ((course, "student"), (wb, "main")):
+                repo.mkdir()
+                self.git(repo, "init", "-q", "-b", branch)
+            self.commit(course, {"course/workforce/lessons/anw-l01.md": "first version\n"}, "First version", date="2026-10-29")
+            self.git(wb, "remote", "add", "agent-workforce", str(course))
+            self.git(wb, "fetch", "-q", "agent-workforce", "student")
+            self.git(wb, "merge", "-q", "--allow-unrelated-histories", "-m", "Add Agent Workforce", "agent-workforce/student")
+            self.commit(wb, {"work/course/staff/founder-brief.md": "My recurring job\n",
+                             "work/course/staff/continuation-anw-l08.json": "{}\n"}, "Save my work", date="2026-11-08")
+            self.commit(course, {SCRIPT: "# start fresh\n"}, "New version", date="2026-11-04")
+            self.git(wb, "fetch", "-q", "agent-workforce", "student")
+            self.assertFalse(self.is_first_update(wb))
+            # the same workbench with one note saved during Cohort 1 is a returning student
+            self.commit(wb, {"work/course/staff/first-run/continuation.json": "{}\n"}, "Cohort 1 save", date="2026-10-02")
+            self.assertTrue(self.is_first_update(wb))
 
 
 if __name__ == "__main__":
