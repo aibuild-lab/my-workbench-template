@@ -79,7 +79,7 @@ class Words(unittest.TestCase):
         self.assertIn("and one of them was saved before Cohort 2 opened: " + COHORT2_CHECK + ".", five)
         self.assertIn("so they are never told to start over", five)
         self.assertIn("a Cohort 2 student whose notes were all saved on or after 10-26-2026) hears none of this.", five)
-        self.assertIn("and only when step 5's Cohort 2 check", six_one)
+        self.assertIn("and only when a course note was saved before Cohort 2 opened: " + COHORT2_CHECK + ". This is the same read as step 5's Cohort 2 check", six_one)
         self.assertIn("A Cohort 2 student is taking the course for the first time, so they are never asked, whatever the state says.", six_one)
         self.assertNotIn("git log", COHORT2_CHECK)  # read-only and off the ask list (D232)
 
