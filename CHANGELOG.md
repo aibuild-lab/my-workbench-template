@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-09, Cohort 2 first-timers are never told to start over
+
+- `aibl-update` steps 5 and 6.1: the returning lines ("We've overhauled Agent Workforce based on Cohort 1's feedback") and the "start the new version from the beginning?" question now also need a course note saved before Cohort 2 opened (`git rev-list -1 --before=2026-10-26T00:00:00 HEAD -- <the course notes>` prints a commit). A Cohort 2 student who enrolled on the first version's files before 11-04 and did Week 1 there heard both when bringing Week 2 in (student report, 11-09). `tests/returning_first_update.py` covers the words and the Git check on a Cohort 2 and a Cohort 1 workbench.
+
 ## 2026-11-07, Week 2 branch brought up to date with main
 
 - `aibl-update` and `aibl-checkpoint` read Git without `git diff`, `git log` or `git show` (D232). The team's settings ask the student before each of those, so in Claude each was an Allow box (launch-walks claude-P1 still saw two from the update's own steps). The same checks now use `git status --porcelain`, `git rev-parse`, `git rev-list`, `git ls-tree`, `git cat-file -p`, `git ls-files` and `git merge-base`, and the update's Rules carry this into the `aibl-enroll` and `aibl-checkpoint` steps it follows. `tests/update_no_ask_reads.py` checks the wording and proves on a real repository that the new reads find what the old ones did.
