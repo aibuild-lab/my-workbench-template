@@ -47,6 +47,18 @@ class UpdateWords(unittest.TestCase):
             self.assertIn(quoted, self.rules)
         self.assertIn("Never report a check's result unless a step says to", self.rules)
 
+    def test_the_talk_rule_comes_first(self):
+        top = self.text[:self.text.index("## In Codex")]
+        self.assertIn("## How you talk while you work: no working notes", top)
+        self.assertIn("Write no sentence before a command. A reply's first words are a result or a question. Between commands, say nothing.", top)
+        for seen in ('"Now compare ..."', "\"Next: the team's settings preview ...\"", "\"I'm now checking ...\"", '"Not asked (v2 run)"'):
+            self.assertIn(seen, top)
+
+    def test_placeholders_are_filled_in(self):
+        self.assertIn("- **Every `<...>` in a command here is a placeholder.**", self.rules)
+        self.assertIn("never run a command that still has `<` or `>` in it", self.rules)
+        self.assertIn("Record the starting commit for recovery: the id `git rev-parse HEAD` prints", self.text)
+
     def test_no_internal_label(self):
         self.assertIn("- **No internal label ever reaches the student.**", self.rules)
         for label in ("`v2_run` or \"v2 run\"", "`in_step`", "`returning_v1`", "a skill's folder name"):
@@ -57,6 +69,7 @@ class UpdateWords(unittest.TestCase):
         self.assertIn("say this plain line, in both apps, word for word, as the only words right before the apply", s)
         self.assertIn("It is a required step line: never leave it out, also in Claude Code, where no box follows it.", s)
         self.assertLess(s.index("Next I let Codex run more of your agents at once in this workbench."), s.index("--codex-threads-apply"))
+        self.assertIn("Write it before you run the apply, never in the same batch of commands as the report or the apply", s)
 
     def test_agent_menu_preview_after_the_commits(self):
         s = step(self.text, "6.5. **Make the update live.**", "\n7. **Verify what arrived.**")
