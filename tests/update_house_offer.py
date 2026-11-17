@@ -29,10 +29,13 @@ class HouseOffer(unittest.TestCase):
         self.assertIn("On a no, change nothing and never offer it again in this update", self.offer)
 
     def test_asks_before_preparing(self):
-        self.assertIn("Prepare nothing until the student answers that line", self.offer)
+        self.assertIn("Prepare nothing until the student answers that question", self.offer)
         self.assertIn("`python3 workforce/house/compile-house.py --out-dir .aibl-local/house`", self.offer)
         self.assertIn("(in Codex it needs no permission)", self.offer)
-        self.assertIn("Read both files before you describe the change, so the first description is complete", self.offer)
+        # robot R6-U and the post-publish check, 11-16-2026: two yeses for one note; now one question, one yes
+        self.assertIn("as one question with one yes", self.offer)
+        self.assertIn("The student's yes to the question above already covers the copy and the save: ask nothing more about the note.", self.offer)
+        self.assertNotIn('ask "Add it?"', self.offer)
 
     def test_no_temporary_folder_and_no_compare_command(self):
         # robot R4-G, 11-16-2026: a temp folder named to the student, git diff --no-index boxes, a broken compare script
@@ -41,7 +44,7 @@ class HouseOffer(unittest.TestCase):
         self.assertIn("with the app's own file reading, and compare them yourself, ignoring line endings", self.offer)
 
     def test_same_writes_as_enroll(self):
-        self.assertIn("follow `aibl-enroll` step 7's checks, with these fixed lines", self.offer)
+        self.assertIn("follow `aibl-enroll` step 7's checks, with these fixed lines (enroll uses the same ones)", self.offer)
         self.assertIn("`git commit -m \"Tell my assistant about my team\" -- AGENTS.md CLAUDE.md`", self.offer)
         self.assertIn("Any other change stops: say in one plain sentence that their assistant wasn't told about the team", self.offer)
 

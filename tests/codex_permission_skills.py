@@ -32,6 +32,7 @@ SCRIPT_WRITES = ["--camp-record", "--home-workbench-apply", "mark-v2", "name_sea
 SCRIPT_NO_PERMISSION = ["--joining-from", "--home-workbench", "settings-merge.mjs",
                         "privacy_check.py gate", "privacy_check.py staged", "privacy_check.py ignore"]
 CARRY_ON = ("Then carry on", "carry on.")
+INSIDE = "compile-house.py --out-dir .aibl-local/house"  # renders inside the workbench, not a protected folder (W204)
 
 
 def text_of(name):
@@ -123,6 +124,8 @@ class SkillText:
                 if not re.search(r"\.(py|mjs)\b", command) or command.endswith((".py", ".mjs")):
                     continue
                 writes = [w for w in SCRIPT_WRITES if w in command]
+                if INSIDE in command:
+                    continue
                 if writes and "--check" not in command:
                     self.assertIn(writes[0], table, f"`{command}` writes a protected place")
                     self.assertIn(MARK, para, f"`{command}` is in a paragraph with no Codex marker")
@@ -150,7 +153,7 @@ class SkillText:
             if command.strip() in {"&&", ";", "|"}:
                 continue
             if command.startswith('python3 -c "'):
-                continue  # one command; step 7's temp folder example has a ; inside its quoted Python
+                continue  # one command (step 7's copy line), never joined to another
             self.assertNotIn("&&", command)
             self.assertNotRegex(command, r";\s*\S", command)
             self.assertNotRegex(command, r"\s\|\s", command)

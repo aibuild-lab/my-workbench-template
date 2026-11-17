@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-11-17, Week 3 update follow-ups: no working notes, one yes per question
+
+- `aibl-update` Rules: "Write no sentence before a command. A reply's first words are a result or a question." The only exceptions are a step's own plain line and a line the student's message asks for first. No working note ("Now compare ...", "Now the team settings preview", "I'm checking ..."), no check result a step doesn't ask for, and no internal label (a report's status or state, such as "v2 run", a step number, a skill's folder name) ever reaches the student. Robot R6-U and the 11-16 post-publish check saw both.
+- `aibl-update` step 6.5: the plain line before `--codex-threads-apply` is a required step line in both apps (Claude Code left it out).
+- `aibl-update` step 6.5: the @ menu preview (`--agent-menu`) is taken after the step's reapply and commits, never in the first look. A preview taken earlier went stale, the apply answered `changed_since_preview`, and the student said yes twice.
+- `aibl-update` step 7, the team note: one question, one yes ("Want me to tell it? I recommend yes.", or "Want me to update it?" when the note changed). No second "Add it?", and no offer to show the lines; the exact block is shown only if the student asks.
+- `aibl-enroll` step 7, the team note: the same fixed lines as the update. It renders into `.aibl-local/house` (no temporary folder), compares by reading both files (no `git diff --no-index`), copies with a fixed `python3 -c` line, never writes `<ref>:<path>` (Git Bash rewrites it), and asks once. The Codex table's temporary-folder row is gone. The Team HQ check reads `git ls-tree` ids instead of `git diff` (the team settings ask before `git diff`). On Windows, `python` first, then `py -3`.
+- Tests: new `tests/update_followups.py` (text checks, and enroll's reads and copy line run in Git Bash); pins updated in `update_house_offer.py` and `codex_permission_skills.py`.
+
 ## 2026-11-16, no red rows in an update, and Codex runs more of the team at once
 
 - `aibl-update` Rules: run only the lines the skill gives, each on its own; no improvised script, no `cat` or `ls` of a path that may be missing, no scratch file (never inside `.git` or a temporary folder), and never show the student a temporary path. Before reading an optional file, a read that never fails says whether it is there: `git ls-tree --name-only <commit> -- <path>` or `git ls-files --cached --others -- <path>`. On Windows, `python` first, then `py -3`.
