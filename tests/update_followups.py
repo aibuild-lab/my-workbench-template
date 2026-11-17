@@ -70,7 +70,7 @@ class UpdateWords(unittest.TestCase):
 
     def test_more_notes_and_the_template_merge_base(self):
         # 11-17 runs 3 and 5: "Same ids, so I'll check ..." and `git merge-base HEAD template/main` (exit 1, a red row)
-        self.assertIn('"Same ids, so I'll check the Codex agent setting."', self.text)
+        self.assertIn("\"Same ids, so I'll check the Codex agent setting.\"", self.text)
         self.assertIn("Never run `git merge-base` with `template/main`: the template and the workbench share no history, so it fails", self.text)
 
     def test_team_settings_apply_carries_its_expect(self):
