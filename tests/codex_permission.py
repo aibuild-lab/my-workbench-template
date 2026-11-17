@@ -32,7 +32,7 @@ GIT_WRITES = {"remote add", "fetch", "checkout", "merge", "commit", "add", "reve
 # why they need no permission. Anything else fails the test.
 SCRIPT_WRITES = ["update-check.mjs --json", "update-check.mjs --home-workbench-apply", "name_seat.py --reapply",
                  "connect_seat.py --reapply", "start_fresh.py answer", "install_codex_langfuse.py",
-                 "install_claude_langfuse.py"]
+                 "install_claude_langfuse.py", "update-check.mjs --codex-threads-apply"]
 SCRIPT_NO_PERMISSION = {
     "update-check.mjs --agent-menu-apply": "Claude Code only; Codex has no agent menu",
     "update-check.mjs --agent-menu": "read-only preview",
@@ -42,6 +42,10 @@ SCRIPT_NO_PERMISSION = {
     "recorder_context.py show": "read only",
     "settings-merge.mjs": "writes .claude/settings.json and its backup, not a protected folder; the commit is in the table",
     "--check": "the recorder installers' read-only check",
+    "--dry-run": "the recorder installers' report, which writes nothing and exits 0",
+    "update-check.mjs --codex-threads": "read-only report; the apply is in the table",
+    "compile-house.py --out-dir .aibl-local/house": "renders into .aibl-local in the workbench, not a protected folder",
+    "git ls-files": "a read that lists only the files that exist",
 }
 
 
@@ -135,7 +139,7 @@ class SkillText(unittest.TestCase):
             for command in spans(body):
                 if not re.search(r"\.(py|mjs)\b", command):
                     continue
-                if any(w in command for w in SCRIPT_WRITES) and "--check" not in command:
+                if any(w in command for w in SCRIPT_WRITES) and "--check" not in command and "--dry-run" not in command:
                     key = next(w for w in SCRIPT_WRITES if w in command)
                     self.assertIn(key.split()[0], table, f"step {name}: `{command}` writes a protected place")
                     self.assertIn(MARK, body, f"step {name} runs `{command}` but has no Codex marker")

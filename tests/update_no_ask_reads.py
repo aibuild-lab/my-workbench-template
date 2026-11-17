@@ -11,7 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ASKED = re.compile(r"`git (diff|log|show)\b[^`]*`")
-FORBIDS = ("never run `git diff`, `git log` or `git show`", "**Read Git without `git diff`, `git log` or `git show`.**")
+FORBIDS = ("never run `git diff`, `git log` or `git show`", "**Read Git without `git diff`, `git log` or `git show`.**",
+           "(no temporary folder, no `git diff`, no `git diff --no-index`, no `diff`, no compare script)")
 
 
 def text(skill):
@@ -29,12 +30,12 @@ class SkillText(unittest.TestCase):
 
     def test_the_update_names_its_replacements(self):
         t = text("aibl-update")
-        for phrase in ["`git rev-parse HEAD:<path>` and `git rev-parse template/main:<path>`",
-                       "`git cat-file -p template/main:.gitignore`",
+        for phrase in ["`git ls-tree HEAD -- <path>` and `git ls-tree template/main -- <path>`",
+                       "`git ls-tree template/main -- .gitignore`",
                        "`git rev-list --format=%s HEAD..<remote>/student`",
                        "`git merge-base HEAD <remote>/student`",
                        "list what is staged with `git status --porcelain`",
-                       "read `git cat-file -p :<file>` beside `git cat-file -p HEAD:<file>`",
+                       "the staged id from `git ls-files -s -- <file>`, the saved id from `git ls-tree HEAD -- <file>`",
                        "read both and compare them yourself, ignoring line endings"]:
             self.assertIn(phrase, t)
 

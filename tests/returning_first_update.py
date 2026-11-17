@@ -69,8 +69,10 @@ class Words(unittest.TestCase):
 
     def test_only_a_returning_students_first_update_hears_them(self):
         five = step(skill(), "5")
-        self.assertIn("`git cat-file -e HEAD:workforce/runtime/start_fresh.py` fails", five)
-        self.assertIn("`git cat-file -e <remote>/student:workforce/runtime/start_fresh.py` succeeds", five)
+        # a read that never fails: git cat-file -e exits 128 on a missing path, a red row (robot R4-G, 11-16-2026)
+        self.assertIn("`git ls-tree --name-only HEAD -- workforce/runtime/start_fresh.py` prints nothing", five)
+        self.assertIn("`git ls-tree --name-only <remote>/student -- workforce/runtime/start_fresh.py` prints its path", five)
+        self.assertNotIn("cat-file -e", five)
         self.assertIn("holds course notes from the first version's lessons", five)
         self.assertIn("hears none of this", five)
 
