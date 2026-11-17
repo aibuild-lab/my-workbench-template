@@ -62,6 +62,12 @@ class UpdateWords(unittest.TestCase):
         self.assertIn("never one this update made, such as the merge, the registry's or one with `^` after it", self.rules)
         self.assertIn("with the starting commit from step 1 as the pre-update commit", self.text)
 
+    def test_the_new_copy_is_read_whole_and_steps_lead_with_the_rule(self):
+        # 11-17 run 4: the agent searched the new copy for its numbered lines only and missed the first section and the Rules
+        self.assertIn("read the whole new `SKILL.md` now, with the app's own file reading (never a search for some of its lines", self.text)
+        self.assertIn("6.5. **Make the update live.** Say nothing between this step's commands except its plain lines, and take the @ menu preview last, after its commits.", self.text)
+        self.assertIn("7. **Verify what arrived.** Say nothing between commands; each offer below is one question with one yes.", self.text)
+
     def test_team_settings_apply_carries_its_expect(self):
         # 11-17 run 3: `settings-merge.mjs --apply` without --expect, a red row
         self.assertIn("never `--apply` alone, which fails", self.text)
