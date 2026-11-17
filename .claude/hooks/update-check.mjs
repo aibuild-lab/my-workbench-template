@@ -12,6 +12,9 @@
 //     Code agent menu" below); the hook adds one line when they are not.
 //   node .claude/hooks/update-check.mjs --home-workbench [--home-workbench-apply]
 //     whether ~/.aibl/workbench.json records this workbench as the home workbench.
+//   node .claude/hooks/update-check.mjs --codex-threads [--codex-threads-apply]
+//     whether this workbench's .codex/config.toml has the course's agent thread setting for Codex
+//     (see "Codex agent threads" below); the apply adds only that one key, never touching another.
 //   node .claude/hooks/update-check.mjs --joining-from
 //     signs that the student is joining from Agent Team HQ (in this workbench) or from Agent
 //     Native Camp (beside it), which aibl-enroll step 1 reads to say the right thing. See "Where
@@ -31,8 +34,9 @@
 //
 // Rules, borrowed from the Camp update check that ran for months:
 //   1. It never changes the workbench. Fetch only. Merging is aibl-update's job, after a yes.
-//      Its only writes are --agent-menu-apply, --home-workbench-apply and --camp-record, outside
-//      the workbench, which aibl-update and aibl-enroll run only after the student's yes or answer,
+//      Its only writes are --codex-threads-apply (one key in this workbench's .codex/config.toml,
+//      which aibl-update runs in its make-live step), and --agent-menu-apply, --home-workbench-apply
+//      and --camp-record, outside the workbench, which aibl-update and aibl-enroll run only after the student's yes or answer,
 //      and --joining-from's Camp record on a verified Camp sign (the line it is about to hear).
 //      The hook itself never writes.
 //   2. It never blocks a session: every path exits 0, and a broken check stays quiet.
@@ -238,12 +242,28 @@ const WINDOWS = process.platform === "win32";
 const CASE_BLIND = WINDOWS || process.platform === "darwin";
 // Finder and Explorer litter that never makes a skill copy "changed"
 const TREE_NOISE = new Set([".DS_Store", "Thumbs.db", "__pycache__"]);
+// Codex agent threads (see that section below): the one key aibl-update adds, and every thread
+// ceiling that counts as already set by the student.
+const CODEX_THREAD_KEY = "max_concurrent_threads_per_session";
+const CODEX_CEILINGS = new Set([
+  `agents.${CODEX_THREAD_KEY}`,
+  "agents.max_threads",
+  `features.multi_agent_v2.${CODEX_THREAD_KEY}`,
+]);
 
 main();
 
 function main() {
   try {
-    if (process.argv.includes("--home-workbench-apply")) {
+    if (process.argv.includes("--codex-threads-apply")) {
+      const root = resolveRoot({});
+      const report = root ? applyCodexThreads(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--codex-threads")) {
+      const root = resolveRoot({});
+      const report = root ? codexThreads(root) : { status: "not_a_workbench" };
+      process.stdout.write(JSON.stringify(report, null, 2) + "\n");
+    } else if (process.argv.includes("--home-workbench-apply")) {
       const root = resolveRoot({});
       const report = root ? applyHomeWorkbench(root) : { status: "not_a_workbench" };
       process.stdout.write(JSON.stringify(report, null, 2) + "\n");
@@ -1577,6 +1597,143 @@ function applyHomeWorkbench(root) {
     return { ...homeWorkbench(root), applied: false, error: error.code || "write_failed", previous: before.recorded };
   }
   return { ...homeWorkbench(root), applied: true, previous: before.recorded };
+}
+
+// ---------------------------------------------------------------------------
+// Codex agent threads
+// ---------------------------------------------------------------------------
+//
+// Codex runs at most 4 agent threads at once in a session, the main conversation included, unless
+// the workbench's own .codex/config.toml raises it (measured on Codex 0.167.1, 11-16-2026). Agent
+// Workforce sets its number in workforce/house/.codex/config.toml ([agents]
+// max_concurrent_threads_per_session); that file is the source of truth, read here, never copied
+// whole. A program never ships the root .codex/config.toml (aibl-update rejects root settings, and
+// a student may have their own keys there), so aibl-update adds just this one key:
+//   - no file: a new file with the [agents] table and the key;
+//   - a file without the key: the key goes under an existing [agents] header, or a new [agents]
+//     table is added at the end; every other byte stays as it was (line endings and a BOM kept);
+//   - any thread ceiling already there (this key, the older agents.max_threads, or
+//     features.multi_agent_v2's key), whatever its value: left alone, it is the student's choice;
+//   - anything this line reader can't place safely (agents defined inline or by a dotted key,
+//     [[agents]], a link, an unreadable file): left alone, with a reason.
+// Codex reads a project's .codex/config.toml only in a folder the student has trusted.
+// CODEX_THREAD_KEY and CODEX_CEILINGS are defined at the top, before main() runs.
+
+function tomlName(raw) {
+  // a dotted TOML key or table name, quotes dropped and whitespace around dots ignored
+  return raw.split(".").map((part) => part.trim().replace(/^"(.*)"$/, "$1").replace(/^'(.*)'$/, "$1")).join(".");
+}
+
+function tomlLines(text) {
+  // [{table, key, value, header, line}] for each line outside a multi-line string
+  const out = [];
+  let table = "";
+  let inString = null;
+  text.split(/\r?\n/).forEach((line, index) => {
+    if (inString) {
+      if (line.split(inString).length % 2 === 0) inString = null;
+      return;
+    }
+    const array = line.match(/^\s*\[\[\s*([^\[\]]+?)\s*\]\]\s*(#.*)?$/);
+    const header = line.match(/^\s*\[\s*([^\[\]]+?)\s*\]\s*(#.*)?$/);
+    if (array) {
+      table = tomlName(array[1]);
+      out.push({ line: index, header: table, array: true });
+      return;
+    }
+    if (header) {
+      table = tomlName(header[1]);
+      out.push({ line: index, header: table });
+      return;
+    }
+    const pair = line.match(/^\s*((?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(?:\s*\.\s*(?:"[^"]*"|'[^']*'|[A-Za-z0-9_-]+))*)\s*=\s*(.*)$/);
+    if (!pair) return;
+    const key = tomlName(pair[1]);
+    const value = pair[2];
+    out.push({ line: index, table, key: table ? `${table}.${key}` : key, value });
+    for (const quote of ['"""', "'''"]) {
+      if (value.split(quote).length % 2 === 0) { inString = quote; break; }
+    }
+  });
+  return out;
+}
+
+function courseThreadSetting(root) {
+  const file = path.join(root, "workforce", "house", ".codex", "config.toml");
+  try {
+    const entry = tomlLines(fs.readFileSync(file, "utf8")).find((e) => e.key === `agents.${CODEX_THREAD_KEY}`);
+    const value = entry ? Number.parseInt(entry.value, 10) : NaN;
+    return Number.isInteger(value) && value > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function codexThreads(root) {
+  const rel = ".codex/config.toml";
+  const file = path.join(root, ".codex", "config.toml");
+  const value = courseThreadSetting(root);
+  const base = { file: rel, setting: `[agents] ${CODEX_THREAD_KEY}`, course_value: value };
+  if (value === null) return { ...base, status: "no_course_setting" };
+  if (isLink(path.join(root, ".codex")) || isLink(file)) return { ...base, status: "left_alone", reason: "link" };
+  if (!exists(file)) {
+    return { ...base, status: "missing", file_exists: false,
+      would_write: `[agents]\n# Set by the course's update. Change it with your agent.\n${CODEX_THREAD_KEY} = ${value}\n` };
+  }
+  if (!isRealFile(file)) return { ...base, status: "left_alone", reason: "not_a_file" };
+  let raw;
+  try { raw = fs.readFileSync(file); } catch { return { ...base, status: "left_alone", reason: "unreadable" }; }
+  const text = raw.toString("utf8");
+  if (text.includes(String.fromCharCode(0xfffd))) return { ...base, status: "left_alone", reason: "unreadable" };
+  const entries = tomlLines(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
+  const ceiling = entries.find((e) => e.key && CODEX_CEILINGS.has(e.key));
+  if (ceiling) return { ...base, status: "already_set", file_exists: true, key: ceiling.key, current: ceiling.value.replace(/\s*#.*$/, "").trim() };
+  const inline = entries.find((e) => (e.key === "agents" || (e.key && e.key.startsWith("agents.") && e.table !== "agents" && !e.table.startsWith("agents.")))
+    || (e.array && e.header === "agents"));
+  if (inline) return { ...base, status: "left_alone", reason: "agents_defined_another_way", file_exists: true };
+  const header = entries.find((e) => e.header === "agents" && !e.array);
+  return { ...base, status: "missing", file_exists: true, adds_to: header ? "agents_table" : "new_agents_table" };
+}
+
+function codexThreadsText(text, value) {
+  // the file's text with the one key added; line endings and a BOM kept
+  const bom = text.charCodeAt(0) === 0xfeff ? text[0] : "";
+  const body = bom ? text.slice(1) : text;
+  const crlf = (body.match(/\r\n/g) || []).length;
+  const lf = (body.match(/\n/g) || []).length - crlf;
+  const eol = crlf > lf ? "\r\n" : "\n";
+  const keyLine = `${CODEX_THREAD_KEY} = ${value}`;
+  const header = tomlLines(body).find((e) => e.header === "agents" && !e.array);
+  if (header) {
+    // keep each line's own ending: rebuild by splitting on the exact separators
+    const parts = body.split(/(\r?\n)/);
+    const at = header.line * 2; // text parts sit at even indexes
+    const sep = parts[at + 1] !== undefined ? parts[at + 1] : eol;
+    parts.splice(at + 1, 0, sep, keyLine);
+    if (parts[at + 3] === undefined) parts.push(sep);
+    return bom + parts.join("");
+  }
+  const ends = body.length === 0 || /\n$/.test(body);
+  const gap = body.length === 0 ? "" : ends ? eol : eol + eol;
+  return bom + body + gap + ["[agents]", "# Set by the course's update. Change it with your agent.", keyLine, ""].join(eol);
+}
+
+function applyCodexThreads(root) {
+  const before = codexThreads(root);
+  if (before.status !== "missing") return { ...before, applied: false };
+  const file = path.join(root, ".codex", "config.toml");
+  const temp = `${file}.${process.pid}.tmp`;
+  try {
+    const next = before.file_exists ? codexThreadsText(fs.readFileSync(file, "utf8"), before.course_value) : before.would_write;
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(temp, next);
+    fs.renameSync(temp, file);
+  } catch (error) {
+    try { fs.rmSync(temp, { force: true }); } catch { /* our own temp file */ }
+    return { ...codexThreads(root), applied: false, error: error.code || "write_failed" };
+  }
+  const after = codexThreads(root);
+  return { ...after, applied: after.status === "already_set", new_file: !before.file_exists };
 }
 
 // ---------------------------------------------------------------------------

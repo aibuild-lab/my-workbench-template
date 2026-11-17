@@ -30,11 +30,20 @@ class HouseOffer(unittest.TestCase):
 
     def test_asks_before_preparing(self):
         self.assertIn("Prepare nothing until the student answers that line", self.offer)
-        self.assertIn("ask to run both the temporary folder and the render outside the sandbox", self.offer)
+        self.assertIn("`python3 workforce/house/compile-house.py --out-dir .aibl-local/house`", self.offer)
+        self.assertIn("(in Codex it needs no permission)", self.offer)
+        self.assertIn("Read both files before you describe the change, so the first description is complete", self.offer)
+
+    def test_no_temporary_folder_and_no_compare_command(self):
+        # robot R4-G, 11-16-2026: a temp folder named to the student, git diff --no-index boxes, a broken compare script
+        self.assertNotIn("mkdtemp", self.offer)
+        self.assertIn("(no temporary folder, no `git diff`, no `git diff --no-index`, no `diff`, no compare script)", self.offer)
+        self.assertIn("with the app's own file reading, and compare them yourself, ignoring line endings", self.offer)
 
     def test_same_writes_as_enroll(self):
-        self.assertIn("exactly as `aibl-enroll` step 7 describes", self.offer)
-        self.assertIn("Any other change stops.", self.offer)
+        self.assertIn("follow `aibl-enroll` step 7's checks, with these fixed lines", self.offer)
+        self.assertIn("`git commit -m \"Tell my assistant about my team\" -- AGENTS.md CLAUDE.md`", self.offer)
+        self.assertIn("Any other change stops: say in one plain sentence that their assistant wasn't told about the team", self.offer)
 
     def test_no_update_still_offers(self):
         step4 = next(l for l in self.text.splitlines() if l.startswith("4. **Check connected programs."))

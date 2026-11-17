@@ -11,7 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ASKED = re.compile(r"`git (diff|log|show)\b[^`]*`")
-FORBIDS = ("never run `git diff`, `git log` or `git show`", "**Read Git without `git diff`, `git log` or `git show`.**")
+FORBIDS = ("never run `git diff`, `git log` or `git show`", "**Read Git without `git diff`, `git log` or `git show`.**",
+           "(no temporary folder, no `git diff`, no `git diff --no-index`, no `diff`, no compare script)")
 
 
 def text(skill):
