@@ -62,6 +62,11 @@ class UpdateWords(unittest.TestCase):
         self.assertIn("never one this update made, such as the merge, the registry's or one with `^` after it", self.rules)
         self.assertIn("with the starting commit from step 1 as the pre-update commit", self.text)
 
+    def test_team_settings_apply_carries_its_expect(self):
+        # 11-17 run 3: `settings-merge.mjs --apply` without --expect, a red row
+        self.assertIn("never `--apply` alone, which fails", self.text)
+        self.assertIn("`node workforce/house/settings-merge.mjs --apply --expect <preview_sha256 from that preview>`", self.text)
+
     def test_no_internal_label(self):
         self.assertIn("- **No internal label ever reaches the student.**", self.rules)
         for label in ("`v2_run` or \"v2 run\"", "`in_step`", "`returning_v1`", "a skill's folder name"):
