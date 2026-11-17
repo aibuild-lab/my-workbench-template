@@ -58,6 +58,9 @@ class UpdateWords(unittest.TestCase):
         self.assertIn("- **Every `<...>` in a command here is a placeholder.**", self.rules)
         self.assertIn("never run a command that still has `<` or `>` in it", self.rules)
         self.assertIn("Record the starting commit for recovery: the id `git rev-parse HEAD` prints", self.text)
+        # 11-17 run 2: the team note was compared with a commit after the merge, so the offer never came
+        self.assertIn("never one this update made, such as the merge, the registry's or one with `^` after it", self.rules)
+        self.assertIn("with the starting commit from step 1 as the pre-update commit", self.text)
 
     def test_no_internal_label(self):
         self.assertIn("- **No internal label ever reaches the student.**", self.rules)
