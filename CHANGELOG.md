@@ -1,5 +1,11 @@
 # Changelog
 
+## 2026-11-22, Codex asks before an agent sends, from enroll and every update
+
+- Wade's ruling (11-22): the two apps get the same ask-before-sending lock. Claude Code already got it from the team settings (`settings-merge.mjs`) at enroll and every update; Codex got it only if Gigawatt ran the course's config sync on the student's yes, which nothing asked for.
+- `aibl-update` step 6.5, right after the thread setting, and `aibl-enroll` step 6, right after the team settings (Agent Workforce only, both apps, no question): when the edition's `workforce/house/compile-codex-config.py` has `--connector-asks`, run its read-only preview `--sync-workbench . --connector-asks`; on `RESULT PREVIEW`, one required plain line ("Next I set Codex to ask you before an agent sends a message from this workbench."), then `--write --expect <preview_sha256>`, then commit `.codex/config.toml` ("Ask before agents send, in Codex too"). It adds only asks (Slack's send tool; every Gmail tool until probe 2 names the send tools), never the agent ceiling, and keeps any approval the student set. A refusal or an older edition changes nothing; a refusal gets one plain line pointing to Gigawatt. Each skill's "In Codex" table has the new write's row. Both app copies identical.
+- Pairs with aibuild-lab/agent-native-workforce-internal branch `wade/codex-connector-asks-20261122` (the `--connector-asks` mode and Lesson 7's new line). Not tested live: that Codex shows the prompt on a real Slack send.
+
 ## 2026-11-17, Week 3 update follow-ups: no working notes, one yes per question
 
 - `aibl-update` Rules: "Write no sentence before a command. A reply's first words are a result or a question." The only exceptions are a step's own plain line and a line the student's message asks for first. No working note ("Now compare ...", "Now the team settings preview", "I'm checking ..."), no check result a step doesn't ask for, and no internal label (a report's status or state, such as "v2 run", a step number, a skill's folder name) ever reaches the student. Robot R6-U and the 11-16 post-publish check saw both.
