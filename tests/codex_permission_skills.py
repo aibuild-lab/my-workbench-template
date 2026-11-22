@@ -28,8 +28,9 @@ GIT_WRITES = {"remote add", "fetch", "checkout", "merge", "commit", "add", "merg
 GH_WRITES = {"gh auth setup-git"}
 NEVER = {"reset", "stash"}  # named only to forbid them
 SCRIPT_WRITES = ["--camp-record", "--home-workbench-apply", "mark-v2", "name_seat.py --reapply", "compile-house.py",
-                 "privacy_check.py untrack", "staged --unstage"]
-SCRIPT_NO_PERMISSION = ["--joining-from", "--home-workbench", "settings-merge.mjs",
+                 "privacy_check.py untrack", "staged --unstage",
+                 "--connector-asks --write"]
+SCRIPT_NO_PERMISSION = ["--joining-from", "--home-workbench", "settings-merge.mjs", "--sync-workbench . --connector-asks",
                         "privacy_check.py gate", "privacy_check.py staged", "privacy_check.py ignore"]
 CARRY_ON = ("Then carry on", "carry on.")
 INSIDE = "compile-house.py --out-dir .aibl-local/house"  # renders inside the workbench, not a protected folder (W204)

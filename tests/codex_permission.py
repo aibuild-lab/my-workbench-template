@@ -32,7 +32,8 @@ GIT_WRITES = {"remote add", "fetch", "checkout", "merge", "commit", "add", "reve
 # why they need no permission. Anything else fails the test.
 SCRIPT_WRITES = ["update-check.mjs --json", "update-check.mjs --home-workbench-apply", "name_seat.py --reapply",
                  "connect_seat.py --reapply", "start_fresh.py answer", "install_codex_langfuse.py",
-                 "install_claude_langfuse.py", "update-check.mjs --codex-threads-apply"]
+                 "install_claude_langfuse.py", "update-check.mjs --codex-threads-apply",
+                 "--connector-asks --write"]
 SCRIPT_NO_PERMISSION = {
     "update-check.mjs --agent-menu-apply": "Claude Code only; Codex has no agent menu",
     "update-check.mjs --agent-menu": "read-only preview",
@@ -44,6 +45,7 @@ SCRIPT_NO_PERMISSION = {
     "--check": "the recorder installers' read-only check",
     "--dry-run": "the recorder installers' report, which writes nothing and exits 0",
     "update-check.mjs --codex-threads": "read-only report; the apply is in the table",
+    "--sync-workbench . --connector-asks": "read-only preview of the Codex ask settings; its --write is in the table",
     "compile-house.py --out-dir .aibl-local/house": "renders into .aibl-local in the workbench, not a protected folder",
     "git ls-files": "a read that lists only the files that exist",
 }
