@@ -84,7 +84,7 @@ class UpdateWords(unittest.TestCase):
             self.assertIn(label, self.rules)
 
     def test_codex_threads_line_is_required(self):
-        s = step(self.text, "**Let Codex run more of the team at once", "Then prove one agent answers.")
+        s = step(self.text, "**Let Codex run more of the team at once", "Then prove one agent answers")
         self.assertIn("say this plain line, in both apps, word for word, as the only words right before the apply", s)
         self.assertIn("It is a required step line: never leave it out, also in Claude Code, where no box follows it.", s)
         self.assertLess(s.index("Next I let Codex run more of your agents at once in this workbench."), s.index("--codex-threads-apply"))
@@ -127,7 +127,7 @@ class EnrollStep7(unittest.TestCase):
 
     def test_the_fixed_lines(self):
         for line in ("`python3 workforce/house/compile-house.py --out-dir .aibl-local/house`",
-                     "`python3 -c \"__import__('shutil').copyfile('.aibl-local/house/AGENTS.md.rendered', 'AGENTS.md')\"`",
+                     "r:=open('.aibl-local/house/AGENTS.md.rendered',encoding='utf-8',newline='').read()",
                      "`python3 -c \"__import__('shutil').copyfile('.aibl-local/house/CLAUDE.md.rendered', 'CLAUDE.md')\"`",
                      "`git commit -m \"Tell my assistant about my team\" -- AGENTS.md CLAUDE.md`",
                      "compare by reading `AGENTS.md` beside `.aibl-local/house/AGENTS.md.rendered`"):
@@ -210,7 +210,7 @@ class EnrollInGitBash(unittest.TestCase):
         py = shutil.which("python") and "python" or (shutil.which("py") and "py -3")
         if not py:
             self.skipTest("no python on PATH")
-        line = next(s for s in re.findall(r"`([^`]+)`", skill("aibl-enroll")) if "copyfile('.aibl-local/house/AGENTS.md.rendered'" in s)
+        line = next(s for s in re.findall(r"`([^`]+)`", skill("aibl-enroll")) if "open('.aibl-local/house/AGENTS.md.rendered'" in s)
         r = self.sh(line.replace("python3", py, 1))
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("house:begin", (self.repo / "AGENTS.md").read_text())
